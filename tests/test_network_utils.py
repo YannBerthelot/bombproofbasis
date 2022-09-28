@@ -110,7 +110,7 @@ def test_get_network_from_architecture():
             actor=True,
             weight_init=True,
         )
-    faulty_network
+        faulty_network
 
 
 def test_compute_KL_divergence():
