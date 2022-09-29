@@ -9,10 +9,11 @@ from pydantic import BaseModel, validator
 
 
 class NetworkConfig(BaseModel):
-    actor_learning_rate: float
-    actor_architecture: list
-    critic_learning_rate: float
-    critic_architecture: list
+    learning_rate: float
+    architecture: list
+    input_shape: int
+    output_shape: int
+    actor: Optional[bool] = True
     model_path: Optional[Path]
     hardware: Optional[str] = "CPU"
 
@@ -30,7 +31,8 @@ class AgentConfig(BaseModel):
     agent_type: str
     continous: bool = False
     law: Optional[str]
-    network: NetworkConfig
+    policy_network: NetworkConfig
+    value_network: Optional[NetworkConfig]
 
     class Config:
         arbitrary_types_allowed = True

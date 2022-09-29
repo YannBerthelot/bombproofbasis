@@ -1,31 +1,35 @@
 import gym
 import pytest
 
+from bombproofbasis.agents.utils import get_action_shape
 from bombproofbasis.types import AgentConfig, NetworkConfig, TrainingConfig
 
 
 def test_config():
+    env = gym.make("CartPole-v1")
+    input_shape = env.observation_space.shape[0]
+    output_shape = get_action_shape(env)
     network_config = NetworkConfig(
-        actor_learning_rate=1e-3,
-        actor_architecture=["32", "relu", "64", "relu", "LSTM(128*3)"],
-        critic_learning_rate=1e-3,
-        critic_architecture=["32", "relu", "64", "relu", "LSTM(128*3)"],
+        learning_rate=1e-3,
+        architecture=["32", "relu", "64", "relu", "LSTM(128*3)"],
+        input_shape=input_shape,
+        output_shape=output_shape,
     )
     with pytest.raises(ValueError):
         faulty_network_config = NetworkConfig(
-            actor_learning_rate=1e-3,
-            actor_architecture=["32", "relu", "64", "relu", "LSTM(128*3)"],
-            critic_learning_rate=1e-3,
-            critic_architecture=["32", "relu", "64", "relu", "LSTM(128*3)"],
+            learning_rate=1e-3,
+            architecture=["32", "relu", "64", "relu", "LSTM(128*3)"],
             hardware="TPU",
+            input_shape=input_shape,
+            output_shape=output_shape,
         )
         faulty_network_config
     agent_config = AgentConfig(
         learning_rate=1e-3,
-        environment=gym.make("CartPole-v1"),
+        environment=env,
         agent_type="A2C",
         continous=False,
-        network=network_config,
+        policy_network=network_config,
     )
 
     training_config = TrainingConfig(
