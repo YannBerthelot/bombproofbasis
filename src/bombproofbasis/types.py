@@ -2,9 +2,11 @@
 Type helpers for the project
 """
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence, Union
 
 import gym
+import numpy as np
+import torch
 from pydantic import BaseModel, validator
 
 
@@ -25,6 +27,42 @@ class NetworkConfig(BaseModel):
         return v
 
 
+NoneType = type(None)
+
+
+class BufferStep(BaseModel):
+    reward: float
+    done: bool
+    value: float
+    log_prob: float
+    entropy: float
+    KL_divergence: float
+
+
+class BufferInternals(BaseModel):
+    rewards: np.ndarray
+    dones: np.ndarray
+    KL_divergences: np.ndarray
+    values: torch.TensorType
+    log_probs: torch.TensorType
+    entropies: torch.TensorType
+    __len__: int
+    returns: Sequence[Union[NoneType, list]]
+    advantages: Sequence[Union[NoneType, torch.TensorType]]
+
+
+class BufferConfig(BaseModel):
+    setting: str
+    gamma: float
+    buffer_size: int
+    n_steps: int
+
+
+class ScalerConfig(BaseModel):
+    scale: bool
+    method: Optional[str] = "standardize"
+
+
 class AgentConfig(BaseModel):
     learning_rate: float
     environment: gym.Env
@@ -33,18 +71,18 @@ class AgentConfig(BaseModel):
     law: Optional[str]
     policy_network: NetworkConfig
     value_network: Optional[NetworkConfig]
+    scaler: Optional[ScalerConfig]
 
     class Config:
         arbitrary_types_allowed = True
 
 
 class TrainingConfig(BaseModel):
-    agent: AgentConfig
     nb_timesteps_train: int
     nb_episodes_test: int
     learning_start: Optional[float] = 0
     logging: str
-    render: bool
+    render: Optional[bool] = False
 
     @validator("logging")
     def hardware_match(cls, v: str) -> str:
