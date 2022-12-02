@@ -19,7 +19,7 @@ class NetworkConfig(BaseModel):
     model_path: Optional[Path]
     hardware: Optional[str] = "CPU"
 
-    @validator("hardware")
+    @validator("hardware", allow_reuse=True)
     def hardware_match(cls, v: str) -> str:
         possible_values = ["CPU", "GPU"]
         if v not in possible_values:
@@ -49,6 +49,9 @@ class BufferInternals(BaseModel):
     __len__: int
     returns: Sequence[Union[NoneType, list]]
     advantages: Sequence[Union[NoneType, torch.TensorType]]
+
+    class Config:
+        arbitrary_types_allowed = True
 
 
 class BufferConfig(BaseModel):

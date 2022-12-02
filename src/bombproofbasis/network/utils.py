@@ -21,7 +21,7 @@ def t(x: np.ndarray) -> torch.Tensor:
     Returns:
         torch.Tensor: Transformed tensor
     """
-    return torch.from_numpy(x).float()
+    return torch.from_numpy(x)  # .float()
 
 
 def init_weights(m: nn.Module, val: float = np.sqrt(2)) -> None:

@@ -2,7 +2,12 @@ import gym
 import pytest
 
 from bombproofbasis.agents.utils import get_action_shape
-from bombproofbasis.types import AgentConfig, NetworkConfig, TrainingConfig
+from bombproofbasis.types import (
+    AgentConfig,
+    NetworkConfig,
+    ScalerConfig,
+    TrainingConfig,
+)
 
 
 def test_config():
@@ -31,7 +36,16 @@ def test_config():
         continous=False,
         policy_network=network_config,
     )
-
+    scaler_config = ScalerConfig(scale=True)
+    agent_with_scaler_config = AgentConfig(
+        learning_rate=1e-3,
+        environment=env,
+        agent_type="A2C",
+        continous=False,
+        policy_network=network_config,
+        scaler=scaler_config,
+    )
+    agent_with_scaler_config
     training_config = TrainingConfig(
         agent=agent_config,
         nb_timesteps_train=int(1e3),

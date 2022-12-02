@@ -50,8 +50,10 @@ class SimpleStandardizer:
         self.M2 = None
         self.std = None
         self._shape = None
+        self.clipping_range = None
         self.shift_mean = shift_mean
         self.clip = clip
+
         if self.clip:
             if clipping_range is None:
                 raise ValueError(
@@ -88,8 +90,8 @@ class SimpleStandardizer:
         self._count += 1
         if self.mean is None:
             self.mean = newValue
-            self.std = np.zeros(len(newValue))
-            self.M2 = np.zeros(len(newValue))
+            self.std = np.zeros(len(newValue), dtype=np.float64)
+            self.M2 = np.zeros(len(newValue), dtype=np.float64)
             self._shape = newValue.shape
         else:
             if self._shape != newValue.shape:
@@ -97,12 +99,12 @@ class SimpleStandardizer:
                     f"The shape of samples has changed ({self._shape} to \
                         {newValue.shape})"
                 )
-        delta = newValue - self.mean
-        self.mean = self.mean + (delta / self._count)
-        delta2 = newValue - self.mean
-        self.M2 += np.multiply(delta, delta2)
+        delta = np.subtract(newValue, self.mean)
+        self.mean = np.add(self.mean, np.divide(delta, self._count))
+        delta2 = np.subtract(newValue, self.mean)
+        self.M2 = np.add(self.M2, np.multiply(delta, delta2))
         if self._count >= 2:
-            self.std = np.sqrt(self.M2 / self._count)
+            self.std = np.sqrt(np.divide(self.M2, self._count))
             self.std = np.nan_to_num(self.std, nan=1)
 
     @staticmethod
@@ -146,12 +148,12 @@ class SimpleStandardizer:
                         std :{std.shape},\
                         mean :{mean.shape}"
             )
+        for i, sigma in enumerate(std):
+            if abs(sigma) < 1:
+                std[i] = 1 / sigma
         if shift_mean:
             new_value = (value - mean) / std
         else:
-            for i, sigma in enumerate(std):
-                if abs(sigma) < 1:
-                    std[i] = 1 / sigma
             new_value = value / std
         if clip:
             return np.clip(new_value, clipping_range[0], clipping_range[1])
@@ -199,6 +201,7 @@ class SimpleStandardizer:
                         std :{std.shape},\
                         mean :{mean.shape}"
             )
+
         if shift_mean:
             new_value = torch.div((torch.sub(value, t(mean))), t(std))
         else:
@@ -235,21 +238,21 @@ class SimpleStandardizer:
         std_temp[std_temp == 0.0] = 1
         if isinstance(value, np.ndarray):
             return self.numpy_transform(
-                value,
-                self.mean,
-                self.std,
-                self.shift_mean,
-                self.clip,
-                self.clipping_range,
+                value=value,
+                mean=self.mean,
+                std=self.std,
+                shift_mean=self.shift_mean,
+                clip=self.clip,
+                clipping_range=self.clipping_range,
             )
         elif isinstance(value, torch.Tensor):
             return self.pytorch_transform(
-                value,
-                self.mean,
-                self.std,
-                self.shift_mean,
-                self.clip,
-                self.clipping_range,
+                value=value,
+                mean=self.mean,
+                std=self.std,
+                shift_mean=self.shift_mean,
+                clip=self.clip,
+                clipping_range=self.clipping_range,
             )
         else:
             raise TypeError(f"type of transform input {type(value)} not handled atm")
