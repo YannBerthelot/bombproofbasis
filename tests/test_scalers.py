@@ -146,6 +146,9 @@ def test_SimpleStandardizer():
 
 def test_Scaler():
     scaler_config = ScalerConfig(scale=True)
+    with pytest.raises(ValueError):
+        scaler = Scaler(ScalerConfig(scale=True, method="undefined"))
+
     scaler = Scaler(config=scaler_config)
 
     size = 100
@@ -170,5 +173,14 @@ def test_Scaler():
         assert abs(np.mean(new_rewards)) < abs(np.mean(rewards))
         assert np.mean(new_observations) == pytest.approx(0)
 
-    with pytest.raises(ValueError):
-        scaler = Scaler(ScalerConfig(scale=True, method="undefined"))
+    # Test load and save
+    scaler.save(".", "test_save")
+    assert os.path.exists("./obs_test_save.pkl")
+    assert os.path.exists("./reward_test_save.pkl")
+    assert os.path.exists("./target_test_save.pkl")
+    scaler2 = Scaler(config=scaler_config)
+    scaler2.load(".", "test_save")
+    assert scaler == scaler2
+    os.remove("./obs_test_save.pkl")
+    os.remove("./reward_test_save.pkl")
+    os.remove("./target_test_save.pkl")

@@ -1,6 +1,7 @@
 """
 Macro scaler objects
 """
+import pickle
 from pathlib import Path
 from typing import Tuple
 
@@ -78,7 +79,7 @@ class Scaler:
         self.obs_scaler, self.reward_scaler, self.target_scaler = self.get_scalers()
         self.obs_scaler.load(path, "obs_" + name)
         self.reward_scaler.load(path, "reward_" + name)
-        self.reward_scaler.load(path, "target_" + name)
+        self.target_scaler.load(path, "target_" + name)
 
     def scale(
         self, obs: np.ndarray, reward: float, fit: bool = True, transform: bool = True
@@ -104,3 +105,9 @@ class Scaler:
             reward = self.reward_scaler.transform(np.array([reward]))[0]
             obs = self.obs_scaler.transform(obs)
         return obs, reward
+
+    def __eq__(self, other):
+        obs = pickle.dumps(self.obs_scaler) == pickle.dumps(other.obs_scaler)
+        reward = pickle.dumps(self.reward_scaler) == pickle.dumps(other.reward_scaler)
+        target = pickle.dumps(self.target_scaler) == pickle.dumps(other.target_scaler)
+        return obs and reward and target
