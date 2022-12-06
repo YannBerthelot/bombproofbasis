@@ -19,6 +19,7 @@ def test_config():
         architecture=["32", "relu", "64", "relu", "LSTM(128*3)"],
         input_shape=input_shape,
         output_shape=output_shape,
+        hardware="CPU",
     )
     with pytest.raises(ValueError):
         faulty_network_config = NetworkConfig(
@@ -79,8 +80,18 @@ def test_config():
             nb_timesteps_train=int(1e3),
             nb_episodes_test=10,
             learning_start=1.5,
-            logging="wandb",
+            logging="nonsense",
             render=False,
         )
 
+        faulty_training_config
+    with pytest.raises(ValueError):
+        faulty_training_config = TrainingConfig(
+            agent=agent_config,
+            nb_timesteps_train=int(1e3),
+            nb_episodes_test=10,
+            learning_start=1.5,
+            logging="wandb",
+            render=False,
+        )
         faulty_training_config

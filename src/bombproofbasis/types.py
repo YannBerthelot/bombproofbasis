@@ -88,7 +88,7 @@ class TrainingConfig(BaseModel):
     render: Optional[bool] = False
 
     @validator("logging")
-    def hardware_match(cls, v: str) -> str:
+    def logging_match(cls, v: str) -> str:
         possible_values = ["tensorboard", "wandb"]
         if v.lower() not in possible_values:
             raise ValueError(f"logging must be in {possible_values}, you chose {v}")
