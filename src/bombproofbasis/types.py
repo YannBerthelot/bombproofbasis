@@ -2,7 +2,7 @@
 Type helpers for the project
 """
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Union
 
 import gym
 import numpy as np
@@ -81,9 +81,10 @@ class AgentConfig(BaseModel):
 
 
 class TrainingConfig(BaseModel):
+    agent: AgentConfig
     nb_timesteps_train: int
     nb_episodes_test: int
-    learning_start: Optional[float] = 0
+    learning_start: Optional[Union[float, int]] = 0
     logging: str
     render: Optional[bool] = False
 
@@ -95,12 +96,14 @@ class TrainingConfig(BaseModel):
         return v
 
     @validator("learning_start")
-    def check_learning_start(cls, v: float) -> float:
-        if isinstance(v, float):
-            if not (v.is_integer()) and not (0 <= v <= 1):
-                raise ValueError(
-                    f"learning start is a fraction and not between 0 and 1 : \
+    def learning_start_match(cls, v: float) -> float:
+        if not ((v.is_integer()) or isinstance(v, int)) and not (0 <= v <= 1):
+            raise ValueError(
+                f"learning start is a fraction and not between 0 and 1 : \
                         {v}, make sure you pass either an int or a fraction\
                              between 0 and 1"
-                )
-        return v
+            )
+        elif (v.is_integer()) and v < 0:
+            raise ValueError(f"Learning start is negative : {v}")
+        else:
+            return v

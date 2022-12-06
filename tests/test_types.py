@@ -79,7 +79,7 @@ def test_config():
             agent=agent_config,
             nb_timesteps_train=int(1e3),
             nb_episodes_test=10,
-            learning_start=1.5,
+            learning_start=0,
             logging="nonsense",
             render=False,
         )
@@ -95,3 +95,21 @@ def test_config():
             render=False,
         )
         faulty_training_config
+    with pytest.raises(ValueError):
+        faulty_training_config = TrainingConfig(
+            agent=agent_config,
+            nb_timesteps_train=int(1e3),
+            nb_episodes_test=10,
+            learning_start=-1,
+            logging="wandb",
+            render=False,
+        )
+    with pytest.raises(ValueError):
+        faulty_training_config = TrainingConfig(
+            agent=agent_config,
+            nb_timesteps_train=int(1e3),
+            nb_episodes_test=10,
+            learning_start="nonsense",
+            logging="wandb",
+            render=False,
+        )
