@@ -2,7 +2,7 @@
 Type helpers for the project
 """
 from pathlib import Path
-from typing import Optional, Sequence, Union
+from typing import Optional, Sequence
 
 import gym
 import numpy as np
@@ -43,12 +43,12 @@ class BufferInternals(BaseModel):
     rewards: np.ndarray
     dones: np.ndarray
     KL_divergences: np.ndarray
-    values: torch.TensorType
-    log_probs: torch.TensorType
-    entropies: torch.TensorType
-    __len__: int
-    returns: Sequence[Union[NoneType, list]]
-    advantages: Sequence[Union[NoneType, torch.TensorType]]
+    values: torch.Tensor
+    log_probs: torch.Tensor
+    entropies: torch.Tensor
+    len: int
+    returns: Optional[Sequence[list]]
+    advantages: Optional[Sequence[torch.Tensor]]
 
     class Config:
         arbitrary_types_allowed = True

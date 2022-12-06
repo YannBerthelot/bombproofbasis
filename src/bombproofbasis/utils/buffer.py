@@ -58,14 +58,14 @@ class RolloutBuffer:
             bool: Wether or not the buffer has reached full capacity.
         """
         return (
-            self.internals.__len__ >= self.config.buffer_size + self.config.n_steps - 1
+            self.internals.len >= self.config.buffer_size + self.config.n_steps - 1
         ) or self.done
 
     def reset(self) -> None:
         """
         Set or reset the buffer internals to its original state.
         """
-        buffer_size = self.config.buffer_size + self.config.n_steps - 1
+        buffer_size = self.config.buffer_size  # + self.config.n_steps
         self.internals = BufferInternals(
             rewards=np.zeros(buffer_size),
             dones=np.zeros(buffer_size),
@@ -73,7 +73,7 @@ class RolloutBuffer:
             values=torch.zeros(buffer_size),
             log_probs=torch.zeros(buffer_size),
             entropies=torch.zeros(buffer_size),
-            __len__=0,
+            len=0,
             returns=None,
             advantages=None,
         )
@@ -96,20 +96,18 @@ class RolloutBuffer:
         """
         if self.full:
             raise ValueError("Buffer is already full, cannot add anymore")
-        self.internals.dones[self.internals.__len__] = buffer_step.done
-        self.internals.values[self.internals.__len__] = buffer_step.value
-        self.internals.log_probs[self.internals.__len__] = buffer_step.log_prob
-        self.internals.entropies[self.internals.__len__] = buffer_step.entropy
-        self.internals.KL_divergences[
-            self.internals.__len__
-        ] = buffer_step.KL_divergence
-        self.internals.rewards[self.internals.__len__] = buffer_step.reward
-        self.internals.__len__ += 1
+        self.internals.dones[self.internals.len] = buffer_step.done
+        self.internals.values[self.internals.len] = buffer_step.value
+        self.internals.log_probs[self.internals.len] = buffer_step.log_prob
+        self.internals.entropies[self.internals.len] = buffer_step.entropy
+        self.internals.KL_divergences[self.internals.len] = buffer_step.KL_divergence
+        self.internals.rewards[self.internals.len] = buffer_step.reward
+        self.internals.len += 1
 
     @staticmethod
-    def compute_n_step_return(rewards: npt.NDArray[np.float64], gamma: float) -> float:
+    def compute_return(rewards: npt.NDArray[np.float64], gamma: float) -> float:
         """
-        Compute the n-step return (cumulative discounted return considering \
+        Compute the return (cumulative discounted return considering \
             only n steps) for the given rewards
 
         Args:
@@ -150,28 +148,28 @@ class RolloutBuffer:
         MC_returns = MC_returns[::-1]
         return MC_returns
 
+    # @staticmethod
+    # def compute_next_return(
+    #     last_return: float, R_0: float, R_N: float, gamma: float, n_steps: int
+    # ) -> float:
+    #     """Compute next return based on previous return, and first and last \
+    #         reward
+
+    #     Args:
+    #         last_return (float): The previous return value
+    #         R_0 (float): The first (early) observed reward in the buffer
+    #         R_N (float): The last (late) observed reward in the buffer
+    #         gamma (float): The discount factor.
+    #         n_steps (int): The number of steps to consider for return \
+    #             computation
+
+    #     Returns:
+    #         float: The next value for return
+    #     """
+    #     return ((last_return - R_0) / gamma) + ((gamma**n_steps) * R_N)
+
     @staticmethod
-    def compute_next_return(
-        last_return: float, R_0: float, R_N: float, gamma: float, n_steps: int
-    ) -> float:
-        """Compute next return based on previous return, and first and last \
-            reward
-
-        Args:
-            last_return (float): The previous return value
-            R_0 (float): The first (early) observed reward in the buffer
-            R_N (float): The last (late) observed reward in the buffer
-            gamma (float): The discount factor.
-            n_steps (int): The number of steps to consider for return \
-                computation
-
-        Returns:
-            float: The next value for return
-        """
-        return ((last_return - R_0) / gamma) + ((gamma**n_steps) * R_N)
-
-    @staticmethod
-    def compute_all_n_step_returns(
+    def compute_n_step_returns(
         rewards: npt.NDArray[np.float64],
         gamma: float,
         buffer_size: int,
@@ -197,52 +195,49 @@ class RolloutBuffer:
         ):  # only iterate for steps for which we have n rewards for full \
             # computation, the rest will be kept for future computations
             rewards_list = rewards[j : min(j + n_steps, len(rewards))]
-            returns.append(RolloutBuffer.compute_n_step_return(rewards_list, gamma))
+            returns.append(RolloutBuffer.compute_return(rewards_list, gamma))
         return returns
 
-    @staticmethod
-    def compute_returns(
-        rewards: npt.NDArray[np.float64],
-        gamma: float,
-        buffer_size: int,
-        n_steps: int,
-    ) -> np.ndarray:
-        """
-        Compute all returns in an iterative fashion. \
-            UTILITY TO BE ASSESSED WHEN COMPARED TO compute_all_n_step_returns
+    # @staticmethod
+    # def compute_n_step_returns_iteratively(
+    #     rewards: npt.NDArray[np.float64],
+    #     gamma: float,
+    #     buffer_size: int,
+    #     n_steps: int,
+    # ) -> np.ndarray:
+    #     """
+    #     Compute all returns in an iterative fashion. \
+    #         UTILITY TO BE ASSESSED WHEN COMPARED TO compute_all_n_step_returns
 
-        Args:
-            rewards (npt.NDArray[np.float64]): The rewards to consider.
-            gamma (float): The discount factor.
-            buffer_size (int): The buffer size.
-            n_steps (int): The number of steps to consider for return \
-                computation.
+    #     Args:
+    #         rewards (npt.NDArray[np.float64]): The rewards to consider.
+    #         gamma (float): The discount factor.
+    #         buffer_size (int): The buffer size.
+    #         n_steps (int): The number of steps to consider for return \
+    #             computation.
 
-        Returns:
-            np.ndarray:  All returns for the given rewards.
-        """
+    #     Returns:
+    #         np.ndarray:  All returns for the given rewards.
+    #     """
 
-        returns = []
+    #     returns = []
 
-        # Compute initial return
-        G_0 = RolloutBuffer.compute_n_step_return(rewards[0 : 0 + n_steps], gamma)
-        returns.append(G_0)
-        for i in range(buffer_size - 1):
-            new_return = RolloutBuffer.compute_next_return(
-                returns[i], rewards[i], rewards[i + n_steps], gamma, n_steps - 1
-            )
-            returns.append(new_return)
-
-        returns = np.array(returns)
-        return returns
+    #     # Compute initial return
+    #     G_0 = RolloutBuffer.compute_return(rewards[0 : 0 + n_steps], gamma)
+    #     returns.append(G_0)
+    #     for i in range(buffer_size - 1):
+    #         new_return = RolloutBuffer.compute_next_return(
+    #             returns[i], rewards[i], rewards[i + n_steps], gamma, n_steps - 1
+    #         )
+    #         returns.append(new_return)
+    #     return np.array(returns)
 
     @staticmethod
-    def compute_advantages(
+    def compute_n_step_advantages(
         returns: npt.NDArray[np.float64],
         values: torch.Tensor,
         dones: npt.NDArray[np.float64],
         gamma: float,
-        last_val: float,
         n_steps: int,
     ) -> np.ndarray:
         """
@@ -256,7 +251,6 @@ class RolloutBuffer:
             values (torch.Tensor): The values (from critic) to consider.
             dones (npt.NDArray[np.float64]): The termination flags to consider.
             gamma (float): The discount factor.
-            last_val (float): The last/previous value.
             n_steps (int): The number of steps to consider for return \
                 computation.
 
@@ -267,16 +261,17 @@ class RolloutBuffer:
             np.ndarray: The advantages.
         """
 
-        next_values = values[n_steps:]
-        next_values = np.append(next_values, last_val)
-
+        # next_values = values[n_steps:]
+        # next_values = np.append(next_values, last_val)
         if n_steps <= 0:
             raise ValueError(f"Invalid steps number : {n_steps}")
         return [
             returns[i]
-            + (1 - dones[i]) * (gamma**n_steps) * next_values[i]
+            + (1 - max(dones[i : i + n_steps + 1]))
+            * (gamma**n_steps)
+            * values[i + n_steps]
             - values[i]
-            for i in range(len(values) - n_steps + 1)
+            for i in range(len(values) - n_steps)
         ]
 
     @staticmethod
@@ -288,67 +283,58 @@ class RolloutBuffer:
         Compute advantages in a Monte-Carlo fashion.
 
         Args:
-            returns (npt.NDArray[np.float64]): _description_
-            values (torch.Tensor): _description_
+            returns (npt.NDArray[np.float64]): The returns to consider
+            values (torch.Tensor): The values (from critic) to consider
 
         Returns:
-            torch.Tensor: _description_
+            torch.Tensor: The advantages.
         """
         return torch.sub(torch.tensor(returns), values)
 
-    def update_advantages(
-        self, last_val: float = None, fast: bool = True, MC: bool = False
-    ) -> None:
-        """Wrapper of static method compute_returns_and_advantages
-
-        Args:
-            last_val (float): The last value computed by the value network
+    def update_advantages(self) -> None:
         """
-        if (self.config.n_steps > 2) and fast:
-            # Faster for high number of steps (complexity constant with n-steps)
-            self.internals.returns = RolloutBuffer.compute_returns(
-                self.internals.rewards,
-                self.config.gamma,
-                self.config.buffer_size,
-                self.config.n_steps,
-            )
-        elif MC:
+        Computes the advantages based on values in buffer and the \
+        buffer's config
+        """
+        # if (self.config.n_steps > 2) and fast:
+        #     # Faster for high number of steps (complexity constant with n-steps)
+        #     self.internals.returns = RolloutBuffer.compute_returns(
+        #         self.internals.rewards,
+        #         self.config.gamma,
+        #         self.config.buffer_size,
+        #         self.config.n_steps,
+        #     )
+        if self.config.setting == "MC":
             self.internals.returns = RolloutBuffer.compute_MC_returns(
                 self.internals.rewards,
                 self.config.gamma,
             )
         else:
-            # Faster for low number of steps
-            self.internals.returns = RolloutBuffer.compute_all_n_step_returns(
+            self.internals.returns = RolloutBuffer.compute_n_step_returns(
                 self.internals.rewards,
                 self.config.gamma,
                 self.config.buffer_size,
                 self.config.n_steps,
             )
-        if MC:
+        if self.config.setting == "MC":
             self.internals.advantages = RolloutBuffer.compute_MC_advantages(
                 self.internals.returns,
                 self.internals.values,
             )
-            self.internals.advantages = self.internals.advantages[
-                : self.internals.__len__
-            ]
-            self.internals.log_probs = self.internals.log_probs[
-                : self.internals.__len__
-            ]
+            self.internals.advantages = self.internals.advantages[: self.internals.len]
+            self.internals.log_probs = self.internals.log_probs[: self.internals.len]
         else:
-            self.internals.advantages = RolloutBuffer.compute_advantages(
+            self.internals.advantages = RolloutBuffer.compute_n_step_advantages(
                 self.internals.returns,
                 self.internals.values,
                 self.internals.dones,
                 self.config.gamma,
-                last_val,
                 self.config.n_steps,
             )
 
     def show(self) -> None:
         """
-        Print the different interal vlaues.
+        Print the different internal values.
         """
         print("REWARDS", self.internals.rewards)
         print("VALUES", self.internals.values)
@@ -356,8 +342,7 @@ class RolloutBuffer:
         print("LOG PROBS", self.internals.log_probs)
         print("ENTROPIES", self.internals.entropies)
         print("KL_DIVERGENCES", self.internals.KL_divergences)
-        if self.internals.advantages is not None:
-            print("ADVANTAGES", self.internals.advantages)
+        print("ADVANTAGES", self.internals.advantages)
 
     def get_steps(self) -> tuple:
         """
@@ -378,7 +363,7 @@ class RolloutBuffer:
             self.internals.KL_divergences,
         )
 
-    def get_steps_list(self) -> Generator:
+    def get_steps_generator(self) -> Generator:
         """
         Creates a generator for the steps (the relevant internal values)
 
@@ -407,11 +392,13 @@ class RolloutBuffer:
         """
         Remove the data that has already been processed from the buffer while \
             conserving data that will be used in next return computation.
+        Seeting arrays to 0 and then modifying the slices is faster than \
+            creating empty arrays and appending.
         """
         buffer_size = self.config.buffer_size + self.config.n_steps - 1
-        old_rewards = self.internals.rewards[-self.config.n_steps + 1 :]
+        old_rewards = self.internals.rewards[-self.config.n_steps :]
         self.internals.rewards = np.zeros(buffer_size)
-        self.internals.rewards[: self.config.n_steps - 1] = old_rewards
+        self.internals.rewards[: self.config.n_steps] = old_rewards
         self.internals.dones = np.zeros(buffer_size)
         self.internals.KL_divergences = np.zeros(buffer_size)
         self.internals.values = np.zeros(buffer_size)
@@ -419,4 +406,4 @@ class RolloutBuffer:
         self.internals.entropies = np.zeros(buffer_size)
         self.internals.advantages = None
         self.internals.returns = None
-        self.internals.__len__ = self.config.n_steps - 1
+        self.internals.len = self.config.n_steps

@@ -175,12 +175,11 @@ def test_Scaler():
 
     # Test load and save
     scaler.save(".", "test_save")
-    assert os.path.exists("./obs_test_save.pkl")
-    assert os.path.exists("./reward_test_save.pkl")
-    assert os.path.exists("./target_test_save.pkl")
+    files = ("./obs_test_save.pkl", "./reward_test_save.pkl", "./target_test_save.pkl")
+    for file in files:
+        assert os.path.exists(file)
     scaler2 = Scaler(config=scaler_config)
     scaler2.load(".", "test_save")
     assert scaler == scaler2
-    os.remove("./obs_test_save.pkl")
-    os.remove("./reward_test_save.pkl")
-    os.remove("./target_test_save.pkl")
+    for file in files:
+        os.remove(file)
