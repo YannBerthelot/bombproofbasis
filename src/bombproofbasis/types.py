@@ -16,7 +16,7 @@ class NetworkConfig(BaseModel):
     input_shape: int
     output_shape: int
     actor: Optional[bool] = True
-    model_path: Optional[Path]
+    model_path: Optional[Path] = Path("./models")
     hardware: Optional[str] = "CPU"
 
     @validator("hardware", allow_reuse=True)
@@ -73,6 +73,7 @@ class AgentConfig(BaseModel):
     continous: bool = False
     law: Optional[str]
     policy_network: NetworkConfig
+    log_path: Optional[Path] = Path("./logs")
     value_network: Optional[NetworkConfig]
     scaler: Optional[ScalerConfig]
 
@@ -80,20 +81,32 @@ class AgentConfig(BaseModel):
         arbitrary_types_allowed = True
 
 
-class TrainingConfig(BaseModel):
-    agent: AgentConfig
-    nb_timesteps_train: int
-    nb_episodes_test: int
-    learning_start: Optional[Union[float, int]] = 0
-    logging: str
-    render: Optional[bool] = False
+class A2CConfig(AgentConfig):
+    buffer: BufferConfig
 
-    @validator("logging")
+
+class LoggingConfig(BaseModel):
+    logging_output: str = "wandb"
+    logging_frequency: int = 100
+
+    @validator("logging_output")
     def logging_match(cls, v: str) -> str:
         possible_values = ["tensorboard", "wandb"]
         if v.lower() not in possible_values:
             raise ValueError(f"logging must be in {possible_values}, you chose {v}")
         return v
+
+
+class TrainingConfig(BaseModel):
+    agent: AgentConfig
+    nb_timesteps_train: int
+    nb_episodes_test: int
+    learning_start: Optional[Union[float, int]] = 0
+    logging: LoggingConfig
+    log_path: Optional[Path] = Path("./logs")
+    model_path: Optional[Path] = Path("./models")
+    render: Optional[bool] = False
+    comment: Optional[str]
 
     @validator("learning_start")
     def learning_start_match(cls, v: float) -> float:

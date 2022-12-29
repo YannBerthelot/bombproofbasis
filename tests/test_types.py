@@ -4,6 +4,7 @@ import pytest
 from bombproofbasis.agents.utils import get_action_shape
 from bombproofbasis.types import (
     AgentConfig,
+    LoggingConfig,
     NetworkConfig,
     ScalerConfig,
     TrainingConfig,
@@ -47,12 +48,18 @@ def test_config():
         scaler=scaler_config,
     )
     agent_with_scaler_config
+
+    logging_config = LoggingConfig(logging_output="wandb", logging_frequency=10)
+    with pytest.raises(ValueError):
+        bad_logging_config = LoggingConfig(
+            logging_output="nonsense", logging_frequency=10
+        )
     training_config = TrainingConfig(
         agent=agent_config,
         nb_timesteps_train=int(1e3),
         nb_episodes_test=10,
         learning_start=0.1,
-        logging="wandb",
+        logging=logging_config,
         render=False,
     )
 
@@ -61,7 +68,7 @@ def test_config():
         nb_timesteps_train=int(1e3),
         nb_episodes_test=10,
         learning_start=int(1e3),
-        logging="wandb",
+        logging=logging_config,
         render=False,
     )
 
@@ -70,7 +77,7 @@ def test_config():
         nb_timesteps_train=int(1e3),
         nb_episodes_test=10,
         learning_start=1e3,
-        logging="wandb",
+        logging=logging_config,
         render=False,
     )
     training_config
@@ -79,19 +86,8 @@ def test_config():
             agent=agent_config,
             nb_timesteps_train=int(1e3),
             nb_episodes_test=10,
-            learning_start=0,
-            logging="nonsense",
-            render=False,
-        )
-
-        faulty_training_config
-    with pytest.raises(ValueError):
-        faulty_training_config = TrainingConfig(
-            agent=agent_config,
-            nb_timesteps_train=int(1e3),
-            nb_episodes_test=10,
             learning_start=1.5,
-            logging="wandb",
+            logging=logging_config,
             render=False,
         )
         faulty_training_config
@@ -101,7 +97,7 @@ def test_config():
             nb_timesteps_train=int(1e3),
             nb_episodes_test=10,
             learning_start=-1,
-            logging="wandb",
+            logging=logging_config,
             render=False,
         )
     with pytest.raises(ValueError):
@@ -110,6 +106,6 @@ def test_config():
             nb_timesteps_train=int(1e3),
             nb_episodes_test=10,
             learning_start="nonsense",
-            logging="wandb",
+            logging=logging_config,
             render=False,
         )

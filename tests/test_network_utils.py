@@ -83,6 +83,13 @@ def test_get_network_from_architecture():
         actor=True,
         weight_init=True,
     )
+    network = get_network_from_architecture(
+        input_shape=input_shape,
+        output_shape=output_shape,
+        architecture=network_architecture_1,
+        actor=False,
+        weight_init=True,
+    )
     with pytest.raises(ValueError):
         # wrong archi length
         faulty_network = get_network_from_architecture(

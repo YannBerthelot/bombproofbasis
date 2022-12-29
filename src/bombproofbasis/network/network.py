@@ -1,20 +1,14 @@
 """
-Define the base network classes
+Define the base network classe
 """
-from abc import abstractmethod
-from pathlib import Path
-from typing import Union
+from typing import Tuple, Union
 
-import numpy as np
-
-# PyTorch
+import torch
 from torch import nn
 
 # Network creator tool
 from bombproofbasis.network.utils import get_device, get_network_from_architecture
 from bombproofbasis.types import NetworkConfig
-
-ZERO = 1e-7
 
 
 class BaseTorchNetwork(nn.Module):
@@ -41,198 +35,110 @@ class BaseTorchNetwork(nn.Module):
             actor=config.actor,
         )
         self.device = get_device(self.config.hardware)
+        self.recurrent = "LSTM" in str(self.network._modules)
+        self.initialize_hidden_states()
 
-    @abstractmethod
-    def select_action(self, obs: np.ndarray) -> Union[int, np.ndarray]:
+    @staticmethod
+    def get_initial_states(
+        hidden_size: int, num_layers: int
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Select the action based on the observation and the current state of \
-            the network
-
-        Actor-specific
+        Get the initial (null) hidden states h_0 and c_0
 
         Args:
-            obs (np.ndarray): The observation to consider
-
-        Raises:
-            NotImplementedError: To be implemented in each specific agent.
+            hidden_size (int): The hidden size of the layer
+            num_layers (int): The number of recurrent layers in the layer
 
         Returns:
-            Union[int, np.ndarray]: The action(s) (discrete or continuous)
+            Tuple[torch.Tensor, torch.Tensor]: Both components of the \
+                hidden state (h_0, c_0)
         """
-        raise NotImplementedError
+        h_0, c_0 = None, None
+        h_0 = torch.zeros(
+            (
+                num_layers,
+                # batch_size,
+                hidden_size,
+            ),
+            dtype=torch.float,
+        )
 
-    @abstractmethod
-    def evaluate_obs(self, obs: np.ndarray) -> float:
+        c_0 = torch.zeros(
+            (
+                num_layers,
+                # batch_size,
+                hidden_size,
+            ),
+            dtype=torch.float,
+        )
+        return (h_0, c_0)
+
+    def initialize_hidden_states(self):
         """
-        Evaluate the observation given the current state of the value network
+        Initialize the hidden state(s) for the recurrent layer(s) \
+            and wrap them in a dict
+        """
+        if self.recurrent:
+            hiddens = {}
+            for i, layer in enumerate(self.network):
+                if isinstance(layer, nn.modules.rnn.LSTM):
+                    hiddens[i] = self.get_initial_states(
+                        hidden_size=layer.hidden_size, num_layers=layer.num_layers
+                    )
+            self.hiddens = hiddens
+        else:
+            self.hiddens = None
 
-        Critic specific
+    def recurrent_forward(
+        self,
+        x: torch.Tensor,
+        hiddens: dict,
+    ) -> Tuple[torch.Tensor, dict]:
+        """
+        Forward pass with at least one recurrent layer.
 
         Args:
-            obs (np.ndarray): The observation to consider
-
-        Raises:
-            NotImplementedError: To be implemented in each specific agent.
+            x (torch.Tensor): Input to be processed
+            hidden (Dict[torch.Tensor]): Hidden state(s) of the LSTM layer(s) \
+                in the following format {layer_index : (h_n, c_n)}
 
         Returns:
-            float : the value of the observation
+            Tuple[Torch.Tensor, Union[Type[None], dict]]: The processed input\
+                and the new hidden state of the LSTM
         """
-        raise NotImplementedError
+        new_hiddens = {}
+        for i, layer in enumerate(self.network):
+            if isinstance(layer, torch.nn.modules.rnn.LSTM):
+                x, new_hidden = layer(
+                    x,
+                    (hiddens[i][0].detach(), hiddens[i][1].detach()),
+                )
+                new_hiddens[i] = new_hidden
+                assert not (
+                    (torch.equal(hiddens[i][0], new_hidden[0]))
+                    and (torch.equal(hiddens[i][1], new_hidden[1]))
+                )
+            else:
+                x = layer(x)
+        return x, new_hiddens
 
-    @abstractmethod
-    def update_policy(self):
+    def forward(
+        self, x: torch.Tensor, hiddens: torch.Tensor = None
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, dict]]:
         """
-        Update the policy according to the agent's specific rules.
-
-        Raises:
-            NotImplementedError: To be implemented in each specific agent.
-        """
-        raise NotImplementedError
-
-    @abstractmethod
-    def save(self, path: Path):
-        """
-        Save the network(s)'s weights.
+        Wrapper function for forward calls depending on recurrency layers
 
         Args:
-            path (Path): The path in which the weights should be saved
+            x (torch.Tensor): Input to be processed
+            # hiddens (torch.Tensor, optional): Hidden state(s) when using RNNs.\
+            #   Defaults to None.
 
-        Raises:
-            NotImplementedError: To be implemented in each specific agent.
-        """
-        raise NotImplementedError
-
-    @abstractmethod
-    def load(self, path: Path):
-        """
-        Load the network(s)'s weights.
-
-        Args:
-            path (Path): The path from which the weights should be loaded
-
-        Raises:
-            NotImplementedError: To be implemented in each specific agent.
-        """
-        raise NotImplementedError
-
-    @property
-    def architecture(self) -> list:
-        """
         Returns:
-            list: The network's architecture
+            Union[torch.Tensor, Tuple[torch.Tensor, Tuple[torch.Tensor, \
+                torch.Tensor]]]: either the output, or the output plus the \
+                hidden states for recurrent networks.
         """
-        return self.config.architecture
-
-
-# class ActorCriticRecurrentNetworks(nn.Module):
-#     """
-#     TBRD
-#     """
-
-#     def __init__(
-#         self,
-#         state_dim,
-#         action_dim,
-#         architecture,
-#         actor=True,
-#         activation="relu",
-#     ):
-#         super().__init__()
-#         self._action_dim = action_dim
-#         self._state_dim = state_dim
-#         self._architecture = architecture[1:-1].split(",")
-#         self.actor = actor
-#         self.activation = activation
-#         self.network = self.init_layers()
-#         print("actor" if actor else "critic", self.network)
-
-#     @property
-#     def architecture(self):
-#         return self._architecture
-
-#     @property
-#     def state_dim(self):
-#         return self._state_dim
-
-#     @property
-#     def action_dim(self):
-#         return self._action_dim
-
-#     @property
-#     def hidden_dim(self):
-#         return self._hidden_dim
-
-#     @property
-#     def num_layers(self):
-#         return self._num_layers
-
-#     def initialize_hidden_states(self):
-#         hiddens = {}
-#         for i, layer in enumerate(self.network):
-#             if isinstance(layer, torch.nn.modules.rnn.LSTM):
-#                 hiddens[i] = ActorCriticRecurrentNetworks.get_initial_states(
-#                     hidden_size=layer.hidden_size, num_layers=layer.num_layers
-#                 )
-#         return hiddens
-
-#     def init_layers(self) -> torch.nn.Sequential:
-#         # Device to run computations on
-#         self.device = "CPU"
-#         output_size = self.action_dim if self.actor else 1
-#         return get_network_from_architecture(
-#             self.state_dim,
-#             output_size,
-#             self.architecture,
-#             activation_function=self.activation,
-#             mode="actor" if self.actor else "critic",
-#         )
-
-#     def forward(
-#         self,
-#         input: torch.Tensor,
-#         hiddens: dict = None,
-#     ) -> Tuple[torch.Tensor, Dict[int, torch.Tensor]]:
-#         """
-#         Layers shared by the actor and the critic:
-#         -Some FCs
-#         -LSTM cell
-
-#         Args:
-#             state (torch.Tensor): State to be processed
-#             hidden (Dict[torch.Tensor]): Hidden states of the LSTM
-
-#         Returns:
-#             Tuple[Torch.Tensor, Torch.Tensor]: The processed state and \
-#                 the new hidden state of the LSTM
-#         """
-#         for i, layer in enumerate(self.network):
-#             if isinstance(layer, torch.nn.modules.rnn.LSTM):
-#                 input = input.view(-1, 1, layer.input_size)
-#                 hiddens[i] = (hiddens[i][0].detach(), hiddens[i][1].detach())
-#                 input, hiddens[i] = layer(input, hiddens[i])
-#             else:
-#                 input = layer(input)
-#         return input, hiddens
-
-#     @staticmethod
-#     def get_initial_states(hidden_size, num_layers):
-#         h_0, c_0 = None, None
-
-#         h_0 = torch.zeros(
-#             (
-#                 num_layers,
-#                 1,
-#                 hidden_size,
-#             ),
-#             dtype=torch.float,
-#         )
-
-#         c_0 = torch.zeros(
-#             (
-#                 num_layers,
-#                 1,
-#                 hidden_size,
-#             ),
-#             dtype=torch.float,
-#         )
-#         return (h_0, c_0)
+        if self.recurrent:
+            x, hiddens = self.recurrent_forward(x, hiddens=hiddens)
+            return x, hiddens
+        return self.network(x)
