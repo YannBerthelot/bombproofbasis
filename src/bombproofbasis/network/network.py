@@ -34,6 +34,11 @@ class BaseTorchNetwork(nn.Module):
             architecture=config.architecture,
             actor=config.actor,
         )
+        if not config.actor:
+            if not config.output_shape == 1:
+                raise ValueError(
+                    f"Critic has an output shape different than one : {config.output_shape}"
+                )
         self.device = get_device(self.config.hardware)
         self.recurrent = "LSTM" in str(self.network._modules)
         self.initialize_hidden_states()

@@ -11,7 +11,7 @@ import torch
 # from bombproofbasis.agents.agent import Agent
 from bombproofbasis.network.network import BaseTorchNetwork
 from bombproofbasis.network.utils import compute_KL_divergence, t
-from bombproofbasis.types import A2CConfig, LoggingConfig
+from bombproofbasis.types import A2CConfig
 
 # from bombproofbasis.utils.buffer import RolloutBuffer
 
@@ -335,60 +335,60 @@ from bombproofbasis.types import A2CConfig, LoggingConfig
 #             )
 
 
-class Logger:
-    """
-    Logger for A2C agent. Used to handle the logging into wandb for the \
-        agent's training.
-    """
+# class Logger:
+#     """
+#     Logger for A2C agent. Used to handle the logging into wandb for the \
+#         agent's training.
+#     """
 
-    def __init__(self, config: LoggingConfig) -> None:
-        """Create the logger based on the config
+#     def __init__(self, config: LoggingConfig) -> None:
+#         """Create the logger based on the config
 
-        Args:
-            config (LoggingConfig): Logger config
-        """
-        self.config = config
+#         Args:
+#             config (LoggingConfig): Logger config
+#         """
+#         self.config = config
 
-    def log(self, timestep: int) -> None:
-        """
-        Logs the relevant values into wandb
+#     def log(self, timestep: int) -> None:
+#         """
+#         Logs the relevant values into wandb
 
-        Args:
-            timestep (int): The current timestep
-        """
+#         Args:
+#             timestep (int): The current timestep
+#         """
 
-        # if timestep % self.config.logging_frequency == 0:
+# if timestep % self.config.logging_frequency == 0:
 
-        #     if self.config["GLOBAL"]["logging"].lower() == "tensorboard":
-        #         if self.writer:
-        #             self.writer.add_scalar(
-        #                 "Train/entropy loss", -entropy_loss, self.index
-        #             )
-        #             self.writer.add_scalar(
-        #                 "Train/leaarning rate",
-        #                 self.lr_scheduler.transform(self.index),
-        #                 self.index,
-        #             )
-        #             self.writer.add_scalar("Train/policy loss", actor_loss, self.index)
-        #             self.writer.add_scalar("Train/critic loss", critic_loss, self.index)
-        #             # self.writer.add_scalar(
-        #             #     "Train/explained variance", explained_variance, self.index
-        #             # )
-        #             # self.writer.add_scalar("Train/kl divergence", KL_divergence, self.index)
-        #         else:
-        #             warnings.warn("No Tensorboard writer available")
-        #     elif self.config["GLOBAL"]["logging"].lower() == "wandb":
-        #         wandb.log(
-        #             {
-        #                 "Train/entropy loss": -entropy_loss,
-        #                 "Train/actor loss": actor_loss,
-        #                 "Train/critic loss": critic_loss,
-        #                 # "Train/explained variance": explained_variance,
-        #                 # "Train/KL divergence": KL_divergence,
-        #                 "Train/learning rate": self.lr_scheduler.transform(self.index),
-        #             },
-        #             commit=False,
-        #         )
+#     if self.config["GLOBAL"]["logging"].lower() == "tensorboard":
+#         if self.writer:
+#             self.writer.add_scalar(
+#                 "Train/entropy loss", -entropy_loss, self.index
+#             )
+#             self.writer.add_scalar(
+#                 "Train/leaarning rate",
+#                 self.lr_scheduler.transform(self.index),
+#                 self.index,
+#             )
+#             self.writer.add_scalar("Train/policy loss", actor_loss, self.index)
+#             self.writer.add_scalar("Train/critic loss", critic_loss, self.index)
+#             # self.writer.add_scalar(
+#             #     "Train/explained variance", explained_variance, self.index
+#             # )
+#             # self.writer.add_scalar("Train/kl divergence", KL_divergence, self.index)
+#         else:
+#             warnings.warn("No Tensorboard writer available")
+#     elif self.config["GLOBAL"]["logging"].lower() == "wandb":
+#         wandb.log(
+#             {
+#                 "Train/entropy loss": -entropy_loss,
+#                 "Train/actor loss": actor_loss,
+#                 "Train/critic loss": critic_loss,
+#                 # "Train/explained variance": explained_variance,
+#                 # "Train/KL divergence": KL_divergence,
+#                 "Train/learning rate": self.lr_scheduler.transform(self.index),
+#             },
+#             commit=False,
+#         )
 
 
 class A2CNetworks:
@@ -474,19 +474,13 @@ class A2CNetworks:
         advantages: torch.Tensor,
         log_prob: torch.Tensor,
         # entropy: torch.Tensor,
-        logger: Logger,
+        # logger: Logger,
     ) -> None:
-        """
-        Update the policy's parameters according to \
-        the n-step A2C updates rules.
+        """TBF
 
         Args:
-            state (np.array): Observation of the state
-            action (np.array): The selected action
-            n_step_return (np.array): The n-step return
-            next_state (np.array): The state n-step after state
-            done (bool, optional): Wether the episode if finished or not at \
-            next-state. Used to handle 1-step. Defaults to False.
+            advantages (torch.Tensor): _description_
+            log_prob (torch.Tensor): _description_
         """
 
         # For logging purposes
@@ -500,11 +494,13 @@ class A2CNetworks:
 
         self.actor_optimizer.zero_grad()
         actor_loss.backward(retain_graph=True)
+        self.actor_optimizer.step()
+
         self.critic_optimizer.zero_grad()
         critic_loss.backward(retain_graph=True)
-
+        self.critic_optimizer.step()
         # Logging
-        logger.log(self.index)
+        # logger.log(self.index)
 
     def get_action_probabilities(self, state: np.ndarray) -> np.ndarray:
         """
@@ -545,7 +541,9 @@ class A2CNetworks:
         Returns:
             np.array: np.array representation of the action probabilities
         """
+
         value, new_hidden = self.critic.forward(t(state).unsqueeze(0), hiddens)
+
         return value, new_hidden
 
     def save(self, folder: Path, name: str = "model") -> None:

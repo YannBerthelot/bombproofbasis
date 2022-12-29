@@ -1,4 +1,5 @@
 import gym
+import pytest
 import torch
 
 from bombproofbasis.agents.utils import get_action_shape
@@ -22,7 +23,16 @@ def test_BaseTorchNetwork():
         f"LSTM({hidden_size}*{num_layers})",
     ]
     seq_len = 1
-
+    with pytest.raises(ValueError):
+        # critic with output shape different from 1
+        network_config = NetworkConfig(
+            learning_rate=1e-3,
+            architecture=classic_architecture,
+            input_shape=input_shape,
+            output_shape=2,
+            actor=False,
+        )
+        network = BaseTorchNetwork(config=network_config)
     ## Test forward passes
     for i, architecture in enumerate((classic_architecture, recurrent_architecture)):
         network_config = NetworkConfig(
