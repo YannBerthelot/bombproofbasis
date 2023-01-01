@@ -44,7 +44,7 @@ version = "literal: pyproject.toml: tool.poetry.version"
 ignore_missing_imports = "True"
 
 [tool.coverage.report]
-exclude_lines = ["if __name__ == .__main__.:", "if torch.cuda.is_available()","if not torch.cuda.is_available()"]
+exclude_lines = ["if __name__ == __main__:", "if torch.cuda.is_available()","if not torch.cuda.is_available()"]
 
 [tool.pytest.ini_options]
 filterwarnings = [
