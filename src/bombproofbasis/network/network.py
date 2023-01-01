@@ -1,7 +1,7 @@
 """
 Define the base network classe
 """
-from typing import Tuple, Union
+from typing import Tuple
 
 import torch
 from torch import nn
@@ -41,7 +41,15 @@ class BaseTorchNetwork(nn.Module):
                 )
         self.device = get_device(self.config.hardware)
         self.recurrent = "LSTM" in str(self.network._modules)
-        self.initialize_hidden_states()
+        self.init_hiddens()
+
+    def init_hiddens(self):
+        """
+        Wrapper to init hidden states of the network
+        """
+        self.hiddens = self.initialize_hidden_states(
+            recurrent=self.recurrent, network=self.network
+        )
 
     @staticmethod
     def get_initial_states(
@@ -78,21 +86,24 @@ class BaseTorchNetwork(nn.Module):
         )
         return (h_0, c_0)
 
-    def initialize_hidden_states(self):
+    @staticmethod
+    def initialize_hidden_states(
+        network: torch.nn.modules.container.Sequential, recurrent: bool
+    ) -> dict:
         """
         Initialize the hidden state(s) for the recurrent layer(s) \
             and wrap them in a dict
         """
-        if self.recurrent:
+        if recurrent:
             hiddens = {}
-            for i, layer in enumerate(self.network):
+            for i, layer in enumerate(network):
                 if isinstance(layer, nn.modules.rnn.LSTM):
-                    hiddens[i] = self.get_initial_states(
+                    hiddens[i] = BaseTorchNetwork.get_initial_states(
                         hidden_size=layer.hidden_size, num_layers=layer.num_layers
                     )
-            self.hiddens = hiddens
         else:
-            self.hiddens = None
+            hiddens = None
+        return hiddens
 
     def recurrent_forward(
         self,
@@ -116,9 +127,9 @@ class BaseTorchNetwork(nn.Module):
             if isinstance(layer, torch.nn.modules.rnn.LSTM):
                 x, new_hidden = layer(
                     x,
-                    (hiddens[i][0].detach(), hiddens[i][1].detach()),
+                    detach_hidden(hiddens[i]),
                 )
-                new_hiddens[i] = new_hidden
+                new_hiddens[i] = detach_hidden(new_hidden)
                 assert not (
                     (torch.equal(hiddens[i][0], new_hidden[0]))
                     and (torch.equal(hiddens[i][1], new_hidden[1]))
@@ -127,9 +138,7 @@ class BaseTorchNetwork(nn.Module):
                 x = layer(x)
         return x, new_hiddens
 
-    def forward(
-        self, x: torch.Tensor, hiddens: torch.Tensor = None
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, dict]]:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Wrapper function for forward calls depending on recurrency layers
 
@@ -144,6 +153,18 @@ class BaseTorchNetwork(nn.Module):
                 hidden states for recurrent networks.
         """
         if self.recurrent:
-            x, hiddens = self.recurrent_forward(x, hiddens=hiddens)
-            return x, hiddens
+            x, self.hiddens = self.recurrent_forward(x, hiddens=self.hiddens)
+            return x
         return self.network(x)
+
+
+def detach_hidden(hidden: tuple) -> tuple:
+    """Detach the hidden states from requires_grad
+
+    Args:
+        hidden (tuple): The hidden states
+
+    Returns:
+        tuple: The detached hidden states
+    """
+    return tuple(map(torch.detach, hidden))

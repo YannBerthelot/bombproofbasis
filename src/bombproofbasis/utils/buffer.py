@@ -1,10 +1,8 @@
 """
 Buffer components
 """
-from typing import Generator
 
 import numpy as np
-import numpy.typing as npt
 import torch
 
 from bombproofbasis.types import BufferConfig, BufferInternals, BufferStep
@@ -43,6 +41,24 @@ class RolloutBuffer:
             raise ValueError("Number of steps must be strictly positive")
         self.reset()
 
+    def reset(self) -> None:
+        """
+        Set or reset the buffer internals to its original state.
+        """
+        buffer_size = self.config.buffer_size  # + self.config.n_steps
+        self.internals = BufferInternals(
+            rewards=torch.zeros((buffer_size, 1)),
+            dones=torch.zeros((buffer_size, 1)),
+            values=torch.zeros((buffer_size, 1)),
+            log_probs=torch.zeros((buffer_size, 1)),
+            entropies=torch.zeros((buffer_size, 1)),
+            returns=torch.zeros((buffer_size, 1)),
+            advantages=torch.zeros((buffer_size, 1)),
+            states=torch.zeros((buffer_size + 1, 1, self.config.obs_shape[0])),
+            actions=torch.zeros((buffer_size, 1)),
+            len=0,
+        )
+
     @property
     def done(self) -> bool:
         """
@@ -61,24 +77,7 @@ class RolloutBuffer:
             self.internals.len >= self.config.buffer_size + self.config.n_steps - 1
         ) or self.done
 
-    def reset(self) -> None:
-        """
-        Set or reset the buffer internals to its original state.
-        """
-        buffer_size = self.config.buffer_size  # + self.config.n_steps
-        self.internals = BufferInternals(
-            rewards=np.zeros(buffer_size),
-            dones=np.zeros(buffer_size),
-            KL_divergences=np.zeros(buffer_size),
-            values=torch.zeros(buffer_size),
-            log_probs=torch.zeros(buffer_size),
-            entropies=torch.zeros(buffer_size),
-            len=0,
-            returns=None,
-            advantages=None,
-        )
-
-    def add(self, buffer_step: BufferStep) -> None:
+    def add(self, step: BufferStep) -> None:
         """
         Add new elements into the buffer.
 
@@ -96,314 +95,112 @@ class RolloutBuffer:
         """
         if self.full:
             raise ValueError("Buffer is already full, cannot add anymore")
-        self.internals.dones[self.internals.len] = buffer_step.done
-        self.internals.values[self.internals.len] = buffer_step.value
-        self.internals.log_probs[self.internals.len] = buffer_step.log_prob
-        self.internals.entropies[self.internals.len] = buffer_step.entropy
-        self.internals.KL_divergences[self.internals.len] = buffer_step.KL_divergence
-        self.internals.rewards[self.internals.len] = buffer_step.reward
+        assert isinstance(step.reward, float)
+        self.internals.rewards[self.internals.len].copy_(step.reward)
+        self.internals.states[self.internals.len + 1].copy_(self.obs2tensor(step.obs))
+        self.internals.actions[self.internals.len].copy_(step.action)
+        self.internals.log_probs[self.internals.len].copy_(step.log_prob)
+        self.internals.values[self.internals.len].copy_(step.value)
+        self.internals.dones[self.internals.len].copy_(step.done)
         self.internals.len += 1
 
-    @staticmethod
-    def compute_return(rewards: npt.NDArray[np.float64], gamma: float) -> float:
+    def _generate_buffer(self, shape: tuple) -> torch.Tensor:
         """
-        Compute the return (cumulative discounted return considering \
-            only n steps) for the given rewards
+        Create a torch tensor of zeros of the relevant shape
 
         Args:
-            rewards (npt.NDArray[np.float64]): The n rewards to consider for \
-                the n-step return
-            gamma (float): The discount factor
+            shape (tuple): The desired shape
 
         Returns:
-            float: _description_
+            torch.Tensor: The initialized buffer
         """
-        # return reduce(lambda a, b: gamma * a + b, reversed(rewards)) -> \
-        # less efficient somehow
-        n_step_return = 0
-        for reward in reversed(rewards):
-            n_step_return = reward + gamma * n_step_return
-        return n_step_return
+        return torch.zeros(shape)
 
-    @staticmethod
-    def compute_MC_returns(rewards: npt.NDArray[np.float64], gamma: float) -> list:
+    def compute_return(self, final_value: torch.Tensor) -> torch.Tensor:
         """
-        Compute all returns in a Monte-Carlo fashion (need for the episode to \
-            be finished) given the rewards for the episode.
+        Compute return based on the internals of the buffer and the final \
+            value (critic value of the final state, which is not included in the buffer)
 
         Args:
-            rewards (npt.NDArray[np.float64]): The rewards for the whole episode.
-            gamma (float): The discount factor (0 <= gamma <= 1)
+            final_value (torch.Tensor): Value prediction from critic for the \
+                final state of the rollout
 
         Returns:
-            list: The returns for the whole episode
+            torch.Tensor: The list of returns as a tensor of single item tensors
         """
-        # return reduce(lambda a, b: gamma * a + b, reversed(rewards)) -> \
-        # less efficient somehow
-        MC_returns = []
-        cum_return = 0
-        for reward in reversed(rewards):
-            cum_return = reward + gamma * cum_return
-            MC_returns.append(cum_return)
-        MC_returns = MC_returns[::-1]
-        return MC_returns
-
-    # @staticmethod
-    # def compute_next_return(
-    #     last_return: float, R_0: float, R_N: float, gamma: float, n_steps: int
-    # ) -> float:
-    #     """Compute next return based on previous return, and first and last \
-    #         reward
-
-    #     Args:
-    #         last_return (float): The previous return value
-    #         R_0 (float): The first (early) observed reward in the buffer
-    #         R_N (float): The last (late) observed reward in the buffer
-    #         gamma (float): The discount factor.
-    #         n_steps (int): The number of steps to consider for return \
-    #             computation
-
-    #     Returns:
-    #         float: The next value for return
-    #     """
-    #     return ((last_return - R_0) / gamma) + ((gamma**n_steps) * R_N)
-
-    @staticmethod
-    def compute_n_step_returns(
-        rewards: npt.NDArray[np.float64],
-        gamma: float,
-        buffer_size: int,
-        n_steps: int,
-    ) -> list:
-        """
-        Compute all n-steps returns for the given rewards
-
-        Args:
-            rewards (npt.NDArray[np.float64]): All rewards to consider for \
-                return computation
-            gamma (float): The discount factor.
-            buffer_size (int): The buffer size.
-            n_steps (int): The number of steps to consider for return \
-                computation.
-
-        Returns:
-            list: All returns for the given rewards.
-        """
-        returns = []
-        for j in range(
-            buffer_size
-        ):  # only iterate for steps for which we have n rewards for full \
-            # computation, the rest will be kept for future computations
-            rewards_list = rewards[j : min(j + n_steps, len(rewards))]
-            returns.append(RolloutBuffer.compute_return(rewards_list, gamma))
-        return returns
-
-    # @staticmethod
-    # def compute_n_step_returns_iteratively(
-    #     rewards: npt.NDArray[np.float64],
-    #     gamma: float,
-    #     buffer_size: int,
-    #     n_steps: int,
-    # ) -> np.ndarray:
-    #     """
-    #     Compute all returns in an iterative fashion. \
-    #         UTILITY TO BE ASSESSED WHEN COMPARED TO compute_all_n_step_returns
-
-    #     Args:
-    #         rewards (npt.NDArray[np.float64]): The rewards to consider.
-    #         gamma (float): The discount factor.
-    #         buffer_size (int): The buffer size.
-    #         n_steps (int): The number of steps to consider for return \
-    #             computation.
-
-    #     Returns:
-    #         np.ndarray:  All returns for the given rewards.
-    #     """
-
-    #     returns = []
-
-    #     # Compute initial return
-    #     G_0 = RolloutBuffer.compute_return(rewards[0 : 0 + n_steps], gamma)
-    #     returns.append(G_0)
-    #     for i in range(buffer_size - 1):
-    #         new_return = RolloutBuffer.compute_next_return(
-    #             returns[i], rewards[i], rewards[i + n_steps], gamma, n_steps - 1
-    #         )
-    #         returns.append(new_return)
-    #     return np.array(returns)
-
-    @staticmethod
-    def compute_n_step_advantages(
-        returns: npt.NDArray[np.float64],
-        values: torch.Tensor,
-        dones: npt.NDArray[np.float64],
-        gamma: float,
-        n_steps: int,
-    ) -> np.ndarray:
-        """
-        Compute advantages (How good was the action in that state when \
-            compared to what I expected from the state) for the given \
-                values in an n-step fashion.
-
-        Args:
-            returns (npt.NDArray[np.float64]): The returns to consider for \
-                advantage computation.
-            values (torch.Tensor): The values (from critic) to consider.
-            dones (npt.NDArray[np.float64]): The termination flags to consider.
-            gamma (float): The discount factor.
-            n_steps (int): The number of steps to consider for return \
-                computation.
-
-        Raises:
-            ValueError: If the number of steps is not positive.
-
-        Returns:
-            np.ndarray: The advantages.
-        """
-
-        # next_values = values[n_steps:]
-        # next_values = np.append(next_values, last_val)
-        if n_steps <= 0:
-            raise ValueError(f"Invalid steps number : {n_steps}")
-        return [
-            returns[i]
-            + (1 - max(dones[i : i + n_steps + 1]))
-            * (gamma**n_steps)
-            * values[i + n_steps]
-            - values[i]
-            for i in range(len(values) - n_steps)
-        ]
-
-    @staticmethod
-    def compute_MC_advantages(
-        returns: npt.NDArray[np.float64],
-        values: torch.Tensor,
-    ) -> torch.Tensor:
-        """
-        Compute advantages in a Monte-Carlo fashion.
-
-        Args:
-            returns (npt.NDArray[np.float64]): The returns to consider
-            values (torch.Tensor): The values (from critic) to consider
-
-        Returns:
-            torch.Tensor: The advantages.
-        """
-        return torch.sub(torch.tensor(returns), values)
-
-    def update_advantages(self) -> None:
-        """
-        Computes the advantages based on values in buffer and the \
-        buffer's config
-        """
-        # if (self.config.n_steps > 2) and fast:
-        #     # Faster for high number of steps (complexity constant with n-steps)
-        #     self.internals.returns = RolloutBuffer.compute_returns(
-        #         self.internals.rewards,
-        #         self.config.gamma,
-        #         self.config.buffer_size,
-        #         self.config.n_steps,
-        #     )
-        if self.config.setting == "MC":
-            self.internals.returns = RolloutBuffer.compute_MC_returns(
-                self.internals.rewards,
-                self.config.gamma,
-            )
-        else:
-            self.internals.returns = RolloutBuffer.compute_n_step_returns(
-                self.internals.rewards,
-                self.config.gamma,
-                self.config.buffer_size,
-                self.config.n_steps,
-            )
-        if self.config.setting == "MC":
-            self.internals.advantages = RolloutBuffer.compute_MC_advantages(
-                self.internals.returns,
-                self.internals.values,
-            )
-            self.internals.advantages = self.internals.advantages[: self.internals.len]
-            self.internals.log_probs = self.internals.log_probs[: self.internals.len]
-        else:
-            self.internals.advantages = RolloutBuffer.compute_n_step_advantages(
-                self.internals.returns,
-                self.internals.values,
-                self.internals.dones,
-                self.config.gamma,
-                self.config.n_steps,
-            )
-
-    def show(self) -> None:
-        """
-        Print the different internal values.
-        """
-        print("REWARDS", self.internals.rewards)
-        print("VALUES", self.internals.values)
-        print("DONES", self.internals.dones)
-        print("LOG PROBS", self.internals.log_probs)
-        print("ENTROPIES", self.internals.entropies)
-        print("KL_DIVERGENCES", self.internals.KL_divergences)
-        print("ADVANTAGES", self.internals.advantages)
-
-    def get_steps(self) -> tuple:
-        """
-        Return the relevant internals to be used for training:\
-            -advantages
-            -log probabilities of the actions
-            -entropies
-            -KL-divergences between policies
-
-
-        Returns:
-            tuple: The aforementionned internals
-        """
-        return (
-            self.internals.advantages,
-            self.internals.log_probs,
-            self.internals.entropies,
-            self.internals.KL_divergences,
+        r_discounted = self._generate_buffer(
+            (self.config.buffer_size, self.config.n_envs)
+        )
+        # Init return with final value (estimate of final reward if episode has not finished)
+        R = self._generate_buffer((1, self.config.n_envs)).masked_scatter(
+            (1 - self.internals.dones[-1]).byte(), final_value
         )
 
-    def get_steps_generator(self) -> Generator:
-        """
-        Creates a generator for the steps (the relevant internal values)
+        for i in reversed(range(self.config.buffer_size)):
+            discounted_return = self.internals.rewards[i] + self.config.gamma * R
+            mask = (
+                1 - self.internals.dones[i]
+            ).byte()  # wether or not to replace the current value by new one \
+            # (byte for less ram usage)
+            R = self._generate_buffer((1, self.config.n_envs)).masked_scatter(
+                mask, discounted_return
+            )
+            r_discounted[i] = R
 
-        Yields:
-            Generator: The steps generator
-        """
-        for advantage, log_prob, entropy, KL_div in zip(
-            self.internals.advantages,
-            self.internals.log_probs,
-            self.internals.entropies,
-            self.internals.KL_divergences,
-        ):
-            yield advantage, log_prob, entropy, KL_div
+        return r_discounted
 
-    # def clear(self) -> None:
-    #     self.internals.rewards = self.internals.rewards[self.config.buffer_size :]
-    #     self.internals.dones = self.internals.dones[self.config.buffer_size :]
-    #     self.internals.KL_divergences = self.internals.KL_divergences[
-    #         self.config.buffer_size :
-    #     ]
-    #     self.internals.values = self.internals.values[self.config.buffer_size :]
-    #     self.internals.log_probs = self.internals.log_probs[self.config.buffer_size :]
-    #     self.internals.entropies = self.internals.entropies[self.config.buffer_size :]
+    @staticmethod
+    def obs2tensor(obs: np.ndarray) -> torch.Tensor:
+        """
+        Convert an observation from gym env to a torch.Tensor
 
-    def clean(self) -> None:
+        Args:
+            obs (np.ndarray): Observation
+
+        Returns:
+            torch.Tensor: Transformed observation
         """
-        Remove the data that has already been processed from the buffer while \
-            conserving data that will be used in next return computation.
-        Seeting arrays to 0 and then modifying the slices is faster than \
-            creating empty arrays and appending.
+        tensor = torch.from_numpy(obs.astype(np.float32))
+        return tensor
+
+    def get_state(self, step):
         """
-        buffer_size = self.config.buffer_size + self.config.n_steps - 1
-        old_rewards = self.internals.rewards[-self.config.n_steps :]
-        self.internals.rewards = np.zeros(buffer_size)
-        self.internals.rewards[: self.config.n_steps] = old_rewards
-        self.internals.dones = np.zeros(buffer_size)
-        self.internals.KL_divergences = np.zeros(buffer_size)
-        self.internals.values = np.zeros(buffer_size)
-        self.internals.log_probs = np.zeros(buffer_size)
-        self.internals.entropies = np.zeros(buffer_size)
-        self.internals.advantages = None
-        self.internals.returns = None
-        self.internals.len = self.config.n_steps
+        Returns the observation of index step as a cloned object,
+        otherwise torch.nn.autograd cannot calculate the gradients
+        (indexing is the culprit)
+        :param step: index of the state
+        :return:
+        """
+        return self.internals.states[step].clone()
+
+    def compute_advantages(self, final_value: torch.Tensor) -> torch.Tensor:
+        """
+        Compute advantages based on the buffer storage and the final value.
+
+        Args:
+            final_value (torch.Tensor): Final value from the critic
+
+        Returns:
+            torch.Tensor: Tensor of advantages (how good were the states when\
+                 compared to expectations from the critic)
+        """
+        returns = self.compute_return(final_value)
+        return torch.subtract(returns, self.internals.values)
+
+    # def after_update(self):
+    #     """
+    #     Cleaning up buffers after a rollout is finished and
+    #     copying the last state to index 0
+    #     :return:
+    #     """
+
+    #     self.internals.states[0].copy_(self.internals.states[-1])
+    #     self.actions = self._generate_buffer(
+    #         (self.config.buffer_size, self.config.n_envs)
+    #     )
+    #     self.log_probs = self._generate_buffer(
+    #         (self.config.buffer_size, self.config.n_envs)
+    #     )
+    #     self.values = self._generate_buffer(
+    #         (self.config.buffer_size, self.config.n_envs)
+    #     )

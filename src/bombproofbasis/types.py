@@ -2,7 +2,7 @@
 Type helpers for the project
 """
 from pathlib import Path
-from typing import Optional, Sequence, Union
+from typing import Optional, Union
 
 import gym
 import numpy as np
@@ -11,11 +11,11 @@ from pydantic import BaseModel, validator
 
 
 class NetworkConfig(BaseModel):
-    learning_rate: float
+    learning_rate: float = 1e-3
     architecture: list
     input_shape: int
     output_shape: int
-    actor: Optional[bool] = True
+    actor: bool = True
     model_path: Optional[Path] = Path("./models")
     hardware: Optional[str] = "CPU"
 
@@ -33,32 +33,34 @@ NoneType = type(None)
 class BufferStep(BaseModel):
     reward: float
     done: bool
-    value: float
-    log_prob: float
-    entropy: float
-    KL_divergence: float
+    value: torch.Tensor
+    log_prob: torch.Tensor
+    action: int
+    obs: np.ndarray
+
+    class Config:
+        arbitrary_types_allowed = True
 
 
 class BufferInternals(BaseModel):
-    rewards: np.ndarray
-    dones: np.ndarray
-    KL_divergences: np.ndarray
+    rewards: torch.Tensor
+    dones: torch.Tensor
     values: torch.Tensor
     log_probs: torch.Tensor
-    entropies: torch.Tensor
+    states: torch.Tensor
+    actions: torch.Tensor
     len: int
-    returns: Optional[Sequence[list]]
-    advantages: Optional[Sequence[torch.Tensor]]
 
     class Config:
         arbitrary_types_allowed = True
 
 
 class BufferConfig(BaseModel):
-    setting: str
-    gamma: float
-    buffer_size: int
-    n_steps: int
+    obs_shape: tuple
+    gamma: Optional[float] = 0.99
+    buffer_size: Optional[int] = 1000
+    n_steps: Optional[int] = 1
+    n_envs: Optional[int] = 1
 
 
 class ScalerConfig(BaseModel):
@@ -67,7 +69,7 @@ class ScalerConfig(BaseModel):
 
 
 class AgentConfig(BaseModel):
-    learning_rate: float
+    learning_rate: float = 1e-3
     environment: gym.Env
     agent_type: str
     continous: bool = False

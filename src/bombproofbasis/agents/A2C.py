@@ -2,337 +2,176 @@
 A2C agent
 """
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Tuple
 
+import gym
 import numpy as np
 import torch
 
 # Base class for Agent
-# from bombproofbasis.agents.agent import Agent
+from bombproofbasis.agents.agent import Agent
 from bombproofbasis.network.network import BaseTorchNetwork
-from bombproofbasis.network.utils import compute_KL_divergence, t
-from bombproofbasis.types import A2CConfig
+from bombproofbasis.types import A2CConfig, BufferStep
+from bombproofbasis.utils.buffer import RolloutBuffer
 
-# from bombproofbasis.utils.buffer import RolloutBuffer
-
-# # Network creator tool
 # from bombproofbasis.utils.normalize import SimpleStandardizer
 
-# class A2C(Agent):
-#     def __init__(self, config: A2CConfig) -> None:
-#         super(
-#             A2C,
-#             self,
-#         ).__init__(config)
 
-#         self.rollout = RolloutBuffer(
-#             buffer_size=config.buffer.buffer_size,
-#             gamma=config.buffer.gamma,
-#             n_steps=config.buffer.n_steps,
-#         )
+class A2C(Agent):
+    """
+    Advantage Actor-Critic Agent
 
-#         # Initialize the policy network with the right shape
-#         self.network = TorchA2C(self)
-#         self.actor_hidden = self.network.actor.initialize_hidden_states()
-#         self.critic_hidden = self.network.critic.initialize_hidden_states()
-#         self.t, self.t_global = 1, 1
+    Args:
+        Agent : Base Agent class
+    """
 
-#     def select_action(
-#         self,
-#         observation: np.array,
-#         hidden: Dict[int, torch.Tensor],
-#     ) -> int:
-#         """
-#         Select the action based on the current policy and the observation
+    def __init__(self, config: A2CConfig) -> None:
+        """
+        Init the A2C components:
+        -rollout buffer
+        -actor and critic networks
 
-#         Args:
-#             observation (np.array): State representation
-#             testing (bool): Wether to be in test mode or not.
+        Args:
+            config (A2CConfig): _description_
+        """
+        super().__init__(config)
 
-#         Returns:
-#             int: The selected action
-#         """
-#         return self.network.select_action(observation, hidden)
+        self.rollout = RolloutBuffer(config.buffer)
+        self.networks = A2CNetworks(config)
+        self.t, self.t_global = 1, 1
 
-#     def compute_value(self, observation: np.array, hidden: np.array) -> int:
-#         """
-#         Select the action based on the current policy and the observation
+    def save(self, folder: Path, name: str = "model"):
+        """
+        Save the current state of the model
 
-#         Args:
-#             observation (np.array): State representation
-#             testing (bool): Wether to be in test mode or not.
+        Args:
+            folder (Path): the folder where to save the model
+            name (str, optional): Model's name. Defaults to "model".
+        """
+        self.networks.save(folder=folder, name=name)
 
-#         Returns:
-#             int: The selected action
-#         """
-#         return self.network.get_value(observation, hidden)
+    def load(self, folder: Path, name: str = "model"):
+        """
+        Load the designated save of the model
 
-#     def pre_train(self, env: gym.Env, nb_timestep: int, scaling=False) -> None:
-#         # Init training
-#         t_old, self.constant_reward_counter = 0, 0
-#         actor_hidden, critic_hidden = self.actor_hidden, self.critic_hidden
-#         # Pre-Training
-#         if nb_timestep > 0:
-#             print("--- Pre-Training ---")
-#             t_pre_train = 1
-#             pbar = tqdm(total=nb_timestep, initial=1)
-#             while t_pre_train <= nb_timestep:
-#                 pbar.update(t_pre_train - t_old)
-#                 t_old = t_pre_train
-#                 done, obs, rewards = False, env.reset(), []
-#                 while not done:
-#                     action, actor_hidden, loss_params = self.select_action(
-#                         obs, actor_hidden
-#                     )
-#                     value, critic_hidden = self.network.get_value(obs, critic_hidden)
-#                     action = self.env.action_space.sample()
-#                     next_obs, reward, done, _ = env.step(action)
-#                     if scaling:
-#                         next_obs, reward = self.scaling(
-#                             next_obs, reward, fit=True, transform=False
-#                         )
-#                     t_pre_train += 1
-#             pbar.close()
-#             print(
-#                 f"Obs scaler - Mean : {self.obs_scaler.mean}, std : {self.obs_scaler.std}"
-#             )
-#             print(f"Reward scaler - std : {self.reward_scaler.std}")
-#             self.obs_scaler.save(path="scalers", name="obs")
-#             self.save_scalers("scalers", "scaler")
-#         return actor_hidden, critic_hidden
+        Args:
+            folder (Path): the folder where to save the model
+            name (str, optional): Model's name. Defaults to "model".
+        """
+        self.networks.load(folder=folder, name=name)
 
-#     def save_scalers(self, path, name) -> None:
-#         self.obs_scaler.save(path=path, name="obs_" + name)
-#         self.reward_scaler.save(path=path, name="reward_" + name)
+    def collect_rollout_episode(self, env: gym.Env) -> torch.Tensor:
+        """
+        Collect experience over a whole episode.
 
-#     def load_scalers(self, path: str, name: str) -> None:
-#         self.obs_scaler, self.reward_scaler, self.target_scaler = self.get_scalers(True)
-#         self.obs_scaler.load(path, "obs_" + name)
-#         self.reward_scaler.load(path, "reward_" + name)
+        Args:
+            env (gym.Env): The environment to use for collection.
 
-#     def train_MC(self, env: gym.Env, nb_timestep: int) -> None:
-#         # actor_hidden, critic_hidden = self.pre_train(
-#         #     env, self.config["GLOBAL"].getfloat("learning_start")
-#         # )
-#         actor_hidden, critic_hidden = self.actor_hidden, self.critic_hidden
-#         self.rollout = RolloutBuffer(
-#             buffer_size=self.env._max_episode_steps,
-#             gamma=self.config["AGENT"].getfloat("gamma"),
-#             n_steps=1,
-#         )
-#         self.t, self.constant_reward_counter, self.old_reward_sum = 1, 0, 0
-#         print("--- Training ---")
-#         t_old = 0
-#         pbar = tqdm(total=nb_timestep, initial=1)
-#         scaling = self.config["GLOBAL"].getboolean("scaling")
-#         while self.t <= nb_timestep:
-#             # tqdm stuff
-#             pbar.update(self.t - t_old)
-#             t_old, t_episode = self.t, 1
+        Returns:
+            torch.Tensor: The estimation of the final's state value by the \
+                critic.
+        """
+        obs, _ = env.reset()
+        self.rollout.internals.states[0].copy_(self.rollout.obs2tensor(obs))
+        done, truncated = False, False
+        t = 0
+        self.networks.reset_hiddens()
+        while not (done or truncated):
+            state = self.rollout.get_state(t)
+            action, log_prob = self.networks.select_action(state)
+            value = self.networks.get_value(state=state)
+            obs, reward, done, truncated, _ = env.step(action)
+            print(reward)
+            self.rollout.add(
+                BufferStep(
+                    reward=reward,
+                    obs=obs,
+                    action=action,
+                    log_prob=log_prob,
+                    value=value,
+                    done=done,
+                )
+            )
+            t += 1
+        with torch.no_grad():
+            final_value = self.networks.get_value(state=self.rollout.get_state(t))
+        return final_value
 
-#             # actual episode
-#             actions_taken = {action: 0 for action in range(self.action_shape)}
-#             done, obs, rewards = False, env.reset(), []
+    def update_policy(self, final_value: torch.Tensor):
+        """
+        Update the agent given the A2C update rule and update the \
+            relevant other parameters
 
-#             reward_sum = 0
-#             while not done:
-#                 (action, next_actor_hidden, loss_params) = self.select_action(
-#                     obs, actor_hidden
-#                 )
-#                 (
-#                     log_prob,
-#                     entropy,
-#                     KL_divergence,
-#                 ) = loss_params
-#                 value, next_critic_hidden = self.network.get_value(obs, critic_hidden)
-#                 next_obs, reward, done, _ = env.step(action)
-#                 reward_sum += reward
+        Args:
+            final_value (torch.Tensor): The estimation of the value, by the \
+                critic, of the final state of the rollout.
+        """
+        self.networks.update(self.rollout, final_value)
+        self.rollout.reset()
 
-#                 actions_taken[int(action)] += 1
-#                 self.rollout.add(reward, done, value, log_prob, entropy, KL_divergence)
+    def train(self, env: gym.Env, n_episodes: int) -> dict:
+        cumulative_reward_per_episode = {}
+        for episode in range(n_episodes):
+            final_value = self.collect_rollout_episode(env)
+            self.update_policy(final_value)
+            cumulative_reward_per_episode[
+                episode
+            ] = self.rollout.internals.rewards.sum()
+        return cumulative_reward_per_episode
 
-#                 self.t_global, self.t, t_episode = (
-#                     self.t_global + 1,
-#                     self.t + 1,
-#                     t_episode + 1,
-#                 )
-#                 if scaling:
-#                     next_obs, reward = self.scaling(
-#                         next_obs, reward, fit=False, transform=True
-#                     )
-#                 obs = next_obs
-#                 critic_hidden, actor_hidden = next_critic_hidden, next_actor_hidden
+    def test(self, env: gym.Env, n_episodes: int, render: bool = False) -> dict:
+        cumulative_reward_per_episode = {}
+        for episode in range(n_episodes):
+            self.networks.reset_hiddens()
+            cumulative_reward_per_episode[episode] = 0
+            obs, _ = env.reset()
+            done, truncated = False, False
+            while not (done or truncated):
+                action = self.select_action(obs)
+                (
+                    obs,
+                    reward,
+                    done,
+                    truncated,
+                    _,
+                ) = env.step(action)
+                if render:
+                    env.render()
+                cumulative_reward_per_episode[episode] += reward
+        return cumulative_reward_per_episode
 
-#             self.rollout.update_advantages(MC=True)
-#             advantages = self.rollout.advantages
-#             # for i in range(t_episode - 1):
-#             #     loss_params_episode = (
-#             #         self.rollout.log_probs[i],
-#             #         self.rollout.entropies[i],
-#             #         self.rollout.KL_divergences[i],
-#             #     )
-#             #     self.network.update_policy(
-#             #         advantages[i], *loss_params_episode, finished=i == t_episode - 2
-#             #     )
-#             loss_params_episode = (
-#                 self.rollout.log_probs,
-#                 self.rollout.entropies,
-#                 self.rollout.KL_divergences,
-#             )
-#             self.network.update_policy(advantages, *loss_params_episode, finished=True)
-#             self.rollout.reset()
-#             self.save_if_best(reward_sum)
-#             if self.early_stopping(reward_sum):
-#                 break
+    def select_action(self, observation: np.ndarray) -> int:
+        """
+        Action selection wrapper from numpy to numpy without gradients
+        See A2CNetworks's select action for one with gradients.
+        Args:
+            observation (np.ndarray): The observation for which to select \
+                action
 
-#             self.old_reward_sum, self.episode = reward_sum, self.episode + 1
-#             self.episode_logging(reward_sum, actions_taken)
+        Returns:
+            np.ndarray: The selected action
+        """
+        observation = np.expand_dims(observation, axis=0)
+        with torch.no_grad():
+            probs = self.networks.actor(self.rollout.obs2tensor(observation))
+            dist = torch.distributions.Categorical(probs=probs)  # gradient needed
+            action = int(dist.sample().item())
+        return action
 
-#         pbar.close()
-#         self.train_logging(self.artifact)
+    def get_value(self, observation: np.ndarray) -> float:
+        """
+        Get the value of a state given the current critic
+        Does not compute any gradient, only used for logging/debugging.
 
-#     def train_TD0(self, env: gym.Env, nb_timestep: int) -> None:
-#         # actor_hidden, critic_hidden = self.pre_train(
-#         #     env, self.config["GLOBAL"].getfloat("learning_start")
-#         # )
-#         actor_hidden, critic_hidden = self.actor_hidden, self.critic_hidden
-#         self.constant_reward_counter, self.old_reward_sum = 0, 0
-#         print("--- Training ---")
-#         t_old = 0
-#         pbar = tqdm(total=nb_timestep, initial=1)
+        Args:
+            observation (np.ndarray): The observation to evaluate
 
-#         while self.t <= nb_timestep:
-#             # tqdm stuff
-#             pbar.update(self.t - t_old)
-#             t_old, t_episode = self.t, 1
-
-#             # actual episode
-#             actions_taken = {action: 0 for action in range(self.action_shape)}
-#             done, obs, rewards = False, env.reset(), []
-
-#             reward_sum = 0
-#             while not done:
-#                 action, next_actor_hidden, loss_params = self.select_action(
-#                     obs, actor_hidden
-#                 )
-#                 value, critic_hidden = self.network.get_value(obs, critic_hidden)
-#                 next_obs, reward, done, _ = env.step(action)
-#                 reward_sum += reward
-#                 if self.config["GLOBAL"].getboolean("scaling"):
-#                     next_obs, reward = self.scaling(
-#                         next_obs, reward, fit=False, transform=True
-#                     )
-#                 next_critic_hidden = critic_hidden.copy()
-#                 next_value, next_next_critic_hidden = self.network.get_value(
-#                     next_obs, critic_hidden
-#                 )
-
-#                 advantage = reward + next_value - value
-#                 actions_taken[int(action)] += 1
-
-#                 self.network.update_policy(advantage, *loss_params, finished=True)
-#                 self.t_global, self.t, t_episode = (
-#                     self.t_global + 1,
-#                     self.t + 1,
-#                     t_episode + 1,
-#                 )
-#                 obs = next_obs
-#                 next_value, next_next_critic_hidden = self.network.get_value(
-#                     next_obs, next_critic_hidden
-#                 )
-#                 critic_hidden, actor_hidden = next_next_critic_hidden, next_actor_hidden
-
-#             self.save_if_best(reward_sum)
-#             if self.early_stopping(reward_sum):
-#                 break
-
-#             self.old_reward_sum, self.episode = reward_sum, self.episode + 1
-#             self.episode_logging(reward_sum, actions_taken)
-
-#         pbar.close()
-#         self.train_logging(self.artifact)
-
-#     def test(
-#         self, env: gym.Env, nb_episodes: int, render: bool = False, scaler_file=None
-#     ) -> None:
-#         """
-#         Test the current policy to evalute its performance
-
-#         Args:
-#             env (gym.Env): The Gym environment to test it on
-#             nb_episodes (int): Number of test episodes
-#             render (bool, optional): Wether or not to render the visuals of \
-#               the episodes while testing. Defaults to False.
-#         """
-#         print("--- Testing ---")
-#         if scaler_file is not None and self.obs_scaler is not None:
-#             with open(scaler_file, "rb") as input_file:
-#                 scaler = pickle.load(input_file)
-#             self.obs_scaler = scaler
-#         episode_rewards = []
-#         best_test_episode_reward = 0
-#         # Iterate over the episodes
-#         for episode in tqdm(range(nb_episodes)):
-#             actor_hidden = self.network.actor.initialize_hidden_states()
-#             # Init episode
-#             done, obs, rewards_sum = False, env.reset(), 0
-
-#             # Generate episode
-#             while not done:
-#                 # Select the action using the current policy
-#                 if self.config["GLOBAL"].getboolean("scaling"):
-#                     obs = self.obs_scaler.transform(obs)
-#                 action, next_actor_hidden, _ = self.select_action(obs, actor_hidden)
-
-#                 # Step the environment accordingly
-#                 next_obs, reward, done, _ = env.step(action)
-
-#                 # Log reward for performance tracking
-#                 rewards_sum += reward
-
-#                 # render the environment
-#                 if render:
-#                     env.render()
-
-#                 # Next step
-#                 obs, actor_hidden = next_obs, next_actor_hidden
-
-#             if rewards_sum > best_test_episode_reward:
-#                 best_test_episode_reward = rewards_sum
-#                 if self.config["GLOBAL"]["logging"] == "wandb":
-#                     wandb.run.summary["Test/best reward sum"] = rewards_sum
-#             # Logging
-#             if self.config["GLOBAL"]["logging"] == "wandb":
-#                 wandb.log(
-#                     {"Test/reward": rewards_sum, "Test/episode": episode}, commit=True
-#                 )
-#             elif self.config["GLOBAL"]["logging"] == "tensorboard":
-#                 self.network.writer.add_scalar("Reward/test", rewards_sum, episode)
-#             # print(f"test number {episode} : {rewards_sum}")
-#             episode_rewards.append(rewards_sum)
-#         env.close()
-#         if self.config["GLOBAL"]["logging"] == "tensorboard":
-#             self.network.writer.add_hparams(
-#                 self.config,
-#                 {
-#                     "test mean reward": np.mean(episode_rewards),
-#                     "test std reward": np.std(episode_rewards),
-#                     "test max reward": max(episode_rewards),
-#                     "min test reward": min(episode_rewards),
-#                 },
-#                 run_name="test",
-#             )
-
-#     def _learn(self) -> None:
-#         for i, steps in enumerate(self.rollout.get_steps_list()):
-#             advantage, log_prob, entropy, kl_divergence = steps
-#             self.network.update_policy(
-#                 advantage,
-#                 log_prob,
-#                 entropy,
-#                 kl_divergence,
-#                 finished=True,
-#             )
+        Returns:
+            float: The observation value
+        """
+        observation = np.expand_dims(observation, axis=0)
+        with torch.no_grad():
+            return self.networks.critic(self.rollout.obs2tensor(observation)).item()
 
 
 # class Logger:
@@ -422,15 +261,17 @@ class A2CNetworks:
         self.index = 0
         self.old_dist = None
 
+    def reset_hiddens(self):
+        """
+        Wrapper to init hidden states of networks
+        """
+        self.actor.init_hiddens()
+        self.critic.init_hiddens()
+
     def select_action(
         self,
-        observation: np.ndarray,
-        hiddens: Dict[int, Tuple[torch.Tensor, torch.Tensor]],
-    ) -> Tuple[
-        int,
-        Dict[int, Tuple[torch.Tensor, torch.Tensor]],
-        Tuple[torch.Tensor, torch.Tensor, float],
-    ]:
+        observation: torch.Tensor,
+    ) -> Tuple[int, torch.Tensor]:
         """
         Select action based on observation (and hidden state if using a \
             reccurent network).
@@ -449,60 +290,67 @@ class A2CNetworks:
                         the relevant features for the A2C update \
                             (log_prob,entropy and KL div)
         """
-        probs, new_hiddens = self.actor.forward(
-            x=t(observation).unsqueeze(0), hiddens=hiddens
-        )
+        probs = self.actor(observation)
         dist = torch.distributions.Categorical(probs=probs)  # gradient needed
         action = dist.sample().detach()
         log_prob = dist.log_prob(action)  # gradient needed
-        entropy = dist.entropy()  # gradient needed
+        # entropy = dist.entropy().detach()  # gradient needed
 
-        KL_divergence = (
-            compute_KL_divergence(self.old_dist, dist)
-            if self.old_dist is not None
-            else 0
-        )  # gradient needed
+        # KL_divergence = (
+        #     compute_KL_divergence(self.old_dist, dist)
+        #     if self.old_dist is not None
+        #     else 0
+        # )  # gradient needed
 
-        return (
-            int(action.item()),
-            new_hiddens,
-            (log_prob, entropy, KL_divergence),
-        )
+        return int(action.item()), log_prob
 
-    def update_policy(
-        self,
-        advantages: torch.Tensor,
-        log_prob: torch.Tensor,
-        # entropy: torch.Tensor,
-        # logger: Logger,
-    ) -> None:
-        """TBF
+    def A2C_loss(
+        self, log_prob: torch.Tensor, advantage: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Compute the loss according to the A2C update rules for the critic and \
+            actor
 
         Args:
-            advantages (torch.Tensor): _description_
-            log_prob (torch.Tensor): _description_
+            log_prob (torch.Tensor): The log-probability of the actions
+            advantage (torch.Tensor): The advantages of the encoutered states
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]: The actor and critic losses
+        """
+        policy_loss = (-log_prob * advantage.detach()).mean()
+        value_loss = advantage.pow(2).mean()
+        return policy_loss, value_loss
+
+    def update(self, buffer: RolloutBuffer, final_value: torch.Tensor) -> None:
+        """
+        Update the nework's weights according to A2C rule.
+
+        Args:
+            advantages (torch.Tensor): advantage to consider
+            log_prob (torch.Tensor): log_prob to consider
         """
 
         # For logging purposes
         torch.autograd.set_detect_anomaly(True)
 
         self.index += 1
-        # Losses (be careful that all its components are torch tensors with grad on)
-        # entropy_loss = -entropy
-        actor_loss = -(torch.mul(log_prob, advantages))
-        critic_loss = advantages.pow(2)
+        actor_loss, critic_loss = self.A2C_loss(
+            buffer.internals.log_probs[: buffer.internals.len],
+            buffer.compute_advantages(final_value)[: buffer.internals.len],
+        )
 
         self.actor_optimizer.zero_grad()
-        actor_loss.backward(retain_graph=True)
+        actor_loss.backward(retain_graph=False)
         self.actor_optimizer.step()
 
         self.critic_optimizer.zero_grad()
-        critic_loss.backward(retain_graph=True)
+        critic_loss.backward(retain_graph=False)
         self.critic_optimizer.step()
         # Logging
         # logger.log(self.index)
 
-    def get_action_probabilities(self, state: np.ndarray) -> np.ndarray:
+    def get_action_probabilities(self, state: torch.Tensor) -> np.ndarray:
         """
         Computes the policy pi(s, theta) for the given state s and for the \
             current policy parameters theta.
@@ -517,16 +365,10 @@ class A2CNetworks:
         Returns:
             np.array: np.array representation of the action probabilities
         """
-        return (
-            self.actor.forward(x=t(state).unsqueeze(0), hiddens=self.actor.hiddens)[0]
-            .detach()
-            .cpu()
-            .numpy()[0]
-        )
 
-    def get_value(
-        self, state: np.ndarray, hiddens: Dict[int, torch.Tensor]
-    ) -> Tuple[torch.Tensor, Dict[int, torch.Tensor]]:
+        return self.actor(state).detach().cpu().numpy()
+
+    def get_value(self, state: torch.Tensor) -> torch.Tensor:
         """
         Computes the state value for the given state s and for the current \
             policy parameters theta.
@@ -541,10 +383,9 @@ class A2CNetworks:
         Returns:
             np.array: np.array representation of the action probabilities
         """
+        value = self.critic(state)
 
-        value, new_hidden = self.critic.forward(t(state).unsqueeze(0), hiddens)
-
-        return value, new_hidden
+        return torch.squeeze(value)
 
     def save(self, folder: Path, name: str = "model") -> None:
         """

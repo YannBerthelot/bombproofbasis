@@ -49,10 +49,10 @@ def test_agent():
     assert agent.action_shape == get_action_shape(env)
 
     with pytest.raises(NotImplementedError):
-        agent.train(env)
+        agent.train(n_episodes=10, env=env)
     with pytest.raises(NotImplementedError):
-        agent.test(env=env, nb_episodes=10, render=False)
+        agent.test(env=env, n_episodes=10, render=False)
     with pytest.raises(NotImplementedError):
-        agent.save()
+        agent.save("./model")
     with pytest.raises(NotImplementedError):
-        agent.load("model")
+        agent.load("./model")

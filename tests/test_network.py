@@ -43,22 +43,13 @@ def test_BaseTorchNetwork():
         )
         network = BaseTorchNetwork(config=network_config)
         if i == 0:
-            output = network(
-                torch.ones(input_shape),
-                hiddens=network.hiddens,
-            )
+            output = network(torch.ones(input_shape))
             assert output.view(-1).shape[0] == output_shape
         else:
-            output, hiddens = network(
+            output = network(
                 torch.ones(input_shape).view(seq_len, input_shape),
-                hiddens=network.hiddens,
             )
-            assert isinstance(hiddens, dict)
             assert output.view(-1).shape[0] == output_shape
-            assert hiddens[5][0].shape == (
-                num_layers,
-                hidden_size,
-            )
     ## More LSTM cells with more layers
     num_layers = 3
     hidden_size = 128
@@ -77,17 +68,7 @@ def test_BaseTorchNetwork():
         output_shape=output_shape,
     )
     network = BaseTorchNetwork(config=network_config)
-    output, hiddens = network(
+    output = network(
         torch.ones(input_shape).view(seq_len, input_shape),
-        hiddens=network.hiddens,
     )
     assert output.view(-1).shape[0] == output_shape
-    assert isinstance(hiddens, dict)
-    assert hiddens[2][0].shape == (
-        num_layers,
-        hidden_size,
-    )
-    assert hiddens[5][0].shape == (
-        num_layers,
-        hidden_size,
-    )

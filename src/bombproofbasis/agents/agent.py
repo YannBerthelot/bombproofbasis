@@ -5,6 +5,7 @@ Base module for agents
 import os
 from abc import abstractmethod
 from datetime import date
+from pathlib import Path
 
 import gym
 import numpy as np
@@ -81,7 +82,7 @@ class Agent:
         return get_action_shape(self.env)
 
     @abstractmethod
-    def select_action(self, observation: np.ndarray) -> None:
+    def select_action(self, observation: np.ndarray) -> int:
         """
         Abstract method for action selection to be implented in each agent.
 
@@ -94,7 +95,7 @@ class Agent:
         raise NotImplementedError
 
     @abstractmethod
-    def train(self, env: gym.Env = None) -> None:
+    def train(self, env: gym.Env, n_episodes: int) -> dict:
         """
         Abstract method for training agent to be implented in each agent.
 
@@ -108,7 +109,7 @@ class Agent:
         raise NotImplementedError
 
     @abstractmethod
-    def test(self, env: gym.Env, nb_episodes: int, render: bool = False) -> None:
+    def test(self, env: gym.Env, n_episodes: int, render: bool = False) -> dict:
         """
         Abstract method for testing agent to be implented in each agent.
 
@@ -122,7 +123,7 @@ class Agent:
         """
         raise NotImplementedError
 
-    def save(self, name: str = "model") -> None:
+    def save(self, folder: Path, name: str = "model") -> None:
         """
         Wrapper method for saving the network weights.
 
@@ -132,7 +133,7 @@ class Agent:
         """
         raise NotImplementedError
 
-    def load(self, name: str) -> None:
+    def load(self, folder: Path, name: str = "model") -> None:
         """
         Wrapper method for loading the network weights.
 
