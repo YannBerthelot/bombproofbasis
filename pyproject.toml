@@ -6,12 +6,13 @@ authors = ["YANN BERTHELOT <yannberthelot1@gmail.com>"]
 
 [tool.poetry.dependencies]
 python = "^3.8"
-torch = "^1.12.1"
+torch = "^1.13.1"
 numpy = "^1.23.3"
 gym = "^0.26.0"
 tqdm = "^4.64.1"
 wandb = "^0.13.3"
 pydantic = "^1.10.2"
+tensorboard = "^2.11.0"
 
 [tool.poetry.dev-dependencies]
 pytest = "^5.2"
@@ -44,7 +45,7 @@ version = "literal: pyproject.toml: tool.poetry.version"
 ignore_missing_imports = "True"
 
 [tool.coverage.report]
-exclude_lines = ["if __name__ == __main__:", "if torch.cuda.is_available()","if not torch.cuda.is_available()"]
+exclude_lines = ["if __name__ == .__main__.:", "if torch.cuda.is_available()","if not torch.cuda.is_available()"]
 
 [tool.pytest.ini_options]
 filterwarnings = [
