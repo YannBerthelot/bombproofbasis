@@ -27,9 +27,10 @@ value_network_config = NetworkConfig(
     actor=False,
 )
 n_steps = 2
+buffer_size = 1 * 2 * n_steps + 1
 buffer_config = BufferConfig(
     obs_shape=ENV.observation_space.shape,
-    buffer_size=2 * n_steps + 1,
+    buffer_size=buffer_size,
     setting="n-step",
     n_steps=n_steps,
 )
@@ -67,5 +68,5 @@ if __name__ == "__main__":
     agent = A2C(A2C_TD_CONFIG)
     print("ACTOR", agent.networks.actor)
     print("CRITIC", agent.networks.critic)
-    agent.train(ENV, n_iter=20000)
-    agent.test(ENV, n_episodes=10)
+    agent.train(ENV, n_iter=int(20000 / buffer_size))
+    agent.test(ENV, n_episodes=10, render=True)

@@ -50,6 +50,13 @@ class RolloutBuffer:
         if self.config.setting == "MC":
             buffer_size = 1000
         else:
+            if not self.config.buffer_size >= 2 * self.config.n_steps + 1:
+                raise ValueError(
+                    f"Buffer size is not big enough for selected n-steps. \
+                        Buffer size : {self.config.buffer_size}, n-steps : \
+                        {self.config.n_steps}, buffer size should be at \
+                        least {2 * self.config.n_steps + 1}"
+                )
             buffer_size = self.config.buffer_size  # + self.config.n_steps
         self.internals = BufferInternals(
             rewards=torch.zeros((buffer_size, 1)),
