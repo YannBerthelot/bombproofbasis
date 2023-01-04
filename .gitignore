@@ -132,3 +132,4 @@ dmypy.json
 changelog.d/*.md
 .DS_Store
 models
+logs
