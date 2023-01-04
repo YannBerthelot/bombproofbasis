@@ -49,7 +49,7 @@ def test_agent():
     assert agent.action_shape == get_action_shape(env)
 
     with pytest.raises(NotImplementedError):
-        agent.train(n_episodes=10, env=env)
+        agent.train(n_iter=10, env=env)
     with pytest.raises(NotImplementedError):
         agent.test(env=env, n_episodes=10, render=False)
     with pytest.raises(NotImplementedError):

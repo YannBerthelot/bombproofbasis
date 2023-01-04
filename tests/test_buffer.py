@@ -60,16 +60,24 @@ def test_add_buffer():
     obs, info = ENV.reset()
     # faulty configs
     with pytest.raises(ValueError):
-        faulty_buffer_config = BufferConfig(obs_shape=obs.shape, gamma=1.99)
+        faulty_buffer_config = BufferConfig(
+            obs_shape=obs.shape, gamma=1.99, setting="n-step"
+        )
         RolloutBuffer(faulty_buffer_config)
     with pytest.raises(ValueError):
-        faulty_buffer_config = BufferConfig(obs_shape=obs.shape, buffer_size=-1)
+        faulty_buffer_config = BufferConfig(
+            obs_shape=obs.shape, buffer_size=-1, setting="n-step"
+        )
         RolloutBuffer(faulty_buffer_config)
     with pytest.raises(ValueError):
-        faulty_buffer_config = BufferConfig(obs_shape=obs.shape, n_steps=-1)
+        faulty_buffer_config = BufferConfig(
+            obs_shape=obs.shape, n_steps=-1, setting="n-step"
+        )
         RolloutBuffer(faulty_buffer_config)
     buffer_size = 10
-    buffer_config = BufferConfig(obs_shape=obs.shape, buffer_size=buffer_size)
+    buffer_config = BufferConfig(
+        obs_shape=obs.shape, buffer_size=buffer_size, setting="n-step"
+    )
     buffer = RolloutBuffer(buffer_config)
     for i in range(buffer_size - 1):
         buffer.add(STEP)
@@ -82,7 +90,7 @@ def test_add_buffer():
 
 def test_return_computation():
     obs, info = ENV.reset()
-    buffer_config = BufferConfig(obs_shape=obs.shape, buffer_size=4)
+    buffer_config = BufferConfig(obs_shape=obs.shape, buffer_size=4, setting="n-step")
     buffer = RolloutBuffer(buffer_config)
     buffer.internals.states[0].copy_(buffer.obs2tensor(obs))
     buffer = fill_buffer(buffer, done=True)

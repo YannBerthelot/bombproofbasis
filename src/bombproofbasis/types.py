@@ -58,9 +58,10 @@ class BufferInternals(BaseModel):
 class BufferConfig(BaseModel):
     obs_shape: tuple
     gamma: Optional[float] = 0.99
-    buffer_size: Optional[int] = 1000
+    buffer_size: Optional[int] = 5
     n_steps: Optional[int] = 1
     n_envs: Optional[int] = 1
+    setting: str
 
 
 class ScalerConfig(BaseModel):
@@ -85,6 +86,7 @@ class AgentConfig(BaseModel):
 
 class A2CConfig(AgentConfig):
     buffer: BufferConfig
+    entropy_coeff: float = 0.01
 
 
 class LoggingConfig(BaseModel):

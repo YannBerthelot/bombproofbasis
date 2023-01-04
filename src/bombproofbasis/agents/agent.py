@@ -95,13 +95,20 @@ class Agent:
         raise NotImplementedError
 
     @abstractmethod
-    def train(self, env: gym.Env, n_episodes: int) -> dict:
+    def train(
+        self,
+        env: gym.Env,
+        n_iter: int,
+    ) -> dict:
         """
         Abstract method for training agent to be implented in each agent.
 
         Args:
-            env (gym.Env, optional): The environment to train on if different\
-                 from the class one. Defaults to None.
+            env (gym.Env): The environment to train the agent on.
+            n_iter (int): the number of training units to train agent for :
+                - episodes for "MC" setting
+                - updates for "n-step" stting
+
 
         Raises:
             NotImplementedError: _description_

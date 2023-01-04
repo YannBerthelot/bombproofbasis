@@ -1,12 +1,16 @@
 """
 A2C agent
 """
+import os
 from pathlib import Path
-from typing import Tuple
+from typing import Tuple, Union
 
 import gym
 import numpy as np
 import torch
+from pydantic import PositiveInt
+from torch.utils.tensorboard import SummaryWriter
+from tqdm import tqdm
 
 # Base class for Agent
 from bombproofbasis.agents.agent import Agent
@@ -39,6 +43,9 @@ class A2C(Agent):
         self.rollout = RolloutBuffer(config.buffer)
         self.networks = A2CNetworks(config)
         self.t, self.t_global = 1, 1
+        self.episode_reward, self.episode_num = 0, 0
+        os.makedirs(config.log_path, exist_ok=True)
+        self.writer = SummaryWriter(comment="statistics", log_dir=config.log_path)
 
     def save(self, folder: Path, name: str = "model"):
         """
@@ -60,7 +67,59 @@ class A2C(Agent):
         """
         self.networks.load(folder=folder, name=name)
 
-    def collect_rollout_episode(self, env: gym.Env) -> torch.Tensor:
+    def collect_rollout(
+        self, env: gym.Env, n_timesteps: PositiveInt
+    ) -> Tuple[torch.Tensor, gym.Env, bool, torch.Tensor]:
+        """
+        Collect the experience according to the buffer's config until either \
+            the buffer is full or the episode is finished.
+
+        Args:
+            env (gym.Env): The env to use for experience collection.
+            n_timesteps (PositiveInt): The number of timesteps to interact for.
+
+        Returns:
+            Tuple[torch.Tensor, gym.Env, bool, torch.Tensor]:
+                - The estimation of the value  by the critic of the last \
+                    state encoutered
+                - The stepped environment in its new state.
+                - Wether or not the environment is finished (done or Truncated).
+                - The cumulative entropy of the rollout.
+        """
+        episode_entropy = 0
+        for step in range(n_timesteps):
+            state = self.rollout.get_state(step)
+            action, log_prob, entropy = self.networks.select_action(state)
+            obs, reward, done, truncated, _ = env.step(action)
+            self.episode_reward += reward
+            episode_entropy += entropy
+            self.t_global += 1
+            finished = done or truncated
+            self.rollout.add(
+                BufferStep(
+                    reward=reward,
+                    obs=obs,
+                    action=action,
+                    log_prob=log_prob,
+                    value=self.networks.get_value(state=state),
+                    done=finished,
+                )
+            )
+            if finished:
+                self.episode_num += 1
+                self.writer.add_scalar(
+                    "Reward/Episode", self.episode_reward, self.episode_num
+                )
+                self.writer.add_scalar("Entropy", episode_entropy, self.episode_num)
+                self.episode_reward = 0
+                break
+        with torch.no_grad():
+            final_value = self.networks.get_value(
+                state=self.rollout.get_state(step + 1)
+            )
+        return final_value, env, finished, episode_entropy
+
+    def collect_episode(self, env: gym.Env) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Collect experience over a whole episode.
 
@@ -76,12 +135,15 @@ class A2C(Agent):
         done, truncated = False, False
         t = 0
         self.networks.reset_hiddens()
+        self.episode_reward = 0
+        episode_entropy = 0
         while not (done or truncated):
             state = self.rollout.get_state(t)
-            action, log_prob = self.networks.select_action(state)
+            action, log_prob, entropy = self.networks.select_action(state)
             value = self.networks.get_value(state=state)
             obs, reward, done, truncated, _ = env.step(action)
-            print(reward)
+            self.episode_reward += reward
+            episode_entropy += entropy
             self.rollout.add(
                 BufferStep(
                     reward=reward,
@@ -93,11 +155,14 @@ class A2C(Agent):
                 )
             )
             t += 1
+            self.t_global += 1
+        self.episode_num += 1
+        self.writer.add_scalar("Reward/Episode", self.episode_reward, self.episode_num)
         with torch.no_grad():
             final_value = self.networks.get_value(state=self.rollout.get_state(t))
-        return final_value
+        return final_value, episode_entropy
 
-    def update_policy(self, final_value: torch.Tensor):
+    def update_policy(self, final_value: torch.Tensor, entropy: torch.Tensor):
         """
         Update the agent given the A2C update rule and update the \
             relevant other parameters
@@ -106,22 +171,89 @@ class A2C(Agent):
             final_value (torch.Tensor): The estimation of the value, by the \
                 critic, of the final state of the rollout.
         """
-        self.networks.update(self.rollout, final_value)
-        self.rollout.reset()
+        actor_loss, critic_loss = self.networks.update(
+            self.rollout, final_value, entropy
+        )
+        if self.writer is not None and actor_loss is not None:
+            self.writer.add_scalar("Loss/Actor", actor_loss, self.t_global)
+            self.writer.add_scalar("Loss/Critic", critic_loss, self.t_global)
 
-    def train(self, env: gym.Env, n_episodes: int) -> dict:
-        cumulative_reward_per_episode = {}
-        for episode in range(n_episodes):
-            final_value = self.collect_rollout_episode(env)
-            self.update_policy(final_value)
-            cumulative_reward_per_episode[
-                episode
-            ] = self.rollout.internals.rewards.sum()
-        return cumulative_reward_per_episode
+    def _train_n_step(self, env: gym.Env, n_updates: PositiveInt):
+        """
+        Train the agent for n_updates in an n-step fashion.
+
+        Args:
+            env (gym.Env): The env to use for training.
+            n_updates (int): How much updates to do.
+        """
+        obs, _ = env.reset()
+        self.rollout.internals.states[0].copy_(self.rollout.obs2tensor(obs))
+        for _ in tqdm(range(n_updates)):
+            final_value, env, terminated, entropy = self.collect_rollout(
+                env, self.rollout.config.buffer_size
+            )
+            self.update_policy(final_value, entropy)
+            self.rollout.after_update()
+            if terminated:
+                obs, _ = env.reset()
+                self.rollout.reset()
+                self.rollout.internals.states[0].copy_(self.rollout.obs2tensor(obs))
+
+        env.close()
+
+    def _train_MC(self, env: gym.Env, n_episodes: int):
+        """
+        Train the agent in an MC fashion.
+
+        Args:
+            env (gym.Env): The environment to use fo training.
+            n_episodes (int): The number of episodes to train the agent for.
+
+        """
+        for _ in tqdm(range(n_episodes)):
+            final_value, episode_entropy = self.collect_episode(env)
+            self.update_policy(final_value, episode_entropy)
+            self.rollout.reset()
+        env.close()
+
+    def train(
+        self,
+        env: gym.Env,
+        n_iter: int,
+    ):
+        """
+        Wrapper for training the agent according to the relevant method.
+
+        Args:
+            env (gym.Env): The environment to train the agent on.
+            n_iter (int): the number of training units to train agent for :
+                - episodes for "MC" setting
+                - updates for "n-step" stting
+        """
+        if self.rollout.config.setting == "MC":
+            self._train_MC(env, n_episodes=n_iter)
+        elif self.rollout.config.setting == "n-step":
+            self._train_n_step(env, n_updates=n_iter)
+        else:
+            raise ValueError(
+                f"Urecognized buffer setting : {self.rollout.config.setting}"
+            )
 
     def test(self, env: gym.Env, n_episodes: int, render: bool = False) -> dict:
+        """
+        Test/Evaluate the agent given its current state.
+
+        Args:
+            env (gym.Env): The environment to test the agent on.
+            n_episodes (int): The number of episodes to test the agent.
+            render (bool, optional): Wether or not to render the environment \
+                while testing. Defaults to False.
+
+        Returns:
+            dict: Testing report for each episode.
+        """
         cumulative_reward_per_episode = {}
-        for episode in range(n_episodes):
+        for episode in tqdm(range(n_episodes)):
             self.networks.reset_hiddens()
             cumulative_reward_per_episode[episode] = 0
             obs, _ = env.reset()
@@ -138,6 +270,7 @@ class A2C(Agent):
                 if render:
                     env.render()
                 cumulative_reward_per_episode[episode] += reward
+        env.close()
         return cumulative_reward_per_episode
 
     def select_action(self, observation: np.ndarray) -> int:
@@ -271,7 +404,7 @@ class A2CNetworks:
     def select_action(
         self,
         observation: torch.Tensor,
-    ) -> Tuple[int, torch.Tensor]:
+    ) -> Tuple[int, torch.Tensor, torch.Tensor]:
         """
         Select action based on observation (and hidden state if using a \
             reccurent network).
@@ -291,21 +424,13 @@ class A2CNetworks:
                             (log_prob,entropy and KL div)
         """
         probs = self.actor(observation)
-        dist = torch.distributions.Categorical(probs=probs)  # gradient needed
+        dist = torch.distributions.Categorical(probs=probs)
         action = dist.sample().detach()
-        log_prob = dist.log_prob(action)  # gradient needed
-        # entropy = dist.entropy().detach()  # gradient needed
-
-        # KL_divergence = (
-        #     compute_KL_divergence(self.old_dist, dist)
-        #     if self.old_dist is not None
-        #     else 0
-        # )  # gradient needed
-
-        return int(action.item()), log_prob
+        log_prob = dist.log_prob(action)
+        return int(action.item()), log_prob, dist.entropy().mean()
 
     def A2C_loss(
-        self, log_prob: torch.Tensor, advantage: torch.Tensor
+        self, log_prob: torch.Tensor, advantage: torch.Tensor, entropy: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Compute the loss according to the A2C update rules for the critic and \
@@ -318,11 +443,14 @@ class A2CNetworks:
         Returns:
             Tuple[torch.Tensor, torch.Tensor]: The actor and critic losses
         """
-        policy_loss = (-log_prob * advantage.detach()).mean()
+        entropy_loss = self.config.entropy_coeff * entropy
+        policy_loss = (-log_prob * advantage.detach()).mean() - entropy_loss
         value_loss = advantage.pow(2).mean()
         return policy_loss, value_loss
 
-    def update(self, buffer: RolloutBuffer, final_value: torch.Tensor) -> None:
+    def update(
+        self, buffer: RolloutBuffer, final_value: torch.Tensor, entropy: torch.Tensor
+    ) -> Union[Tuple[torch.Tensor, torch.Tensor], None]:
         """
         Update the nework's weights according to A2C rule.
 
@@ -333,22 +461,24 @@ class A2CNetworks:
 
         # For logging purposes
         torch.autograd.set_detect_anomaly(True)
-
         self.index += 1
-        actor_loss, critic_loss = self.A2C_loss(
-            buffer.internals.log_probs[: buffer.internals.len],
-            buffer.compute_advantages(final_value)[: buffer.internals.len],
-        )
+        n_steps = 0 if buffer.config.setting == "MC" else buffer.config.n_steps - 1
+        advantages = buffer.compute_advantages(final_value)
+        if advantages is not None:
+            actor_loss, critic_loss = self.A2C_loss(
+                buffer.internals.log_probs[: buffer.internals.len - n_steps],
+                advantages[: buffer.internals.len],
+                entropy,
+            )
+            self.actor_optimizer.zero_grad()
+            actor_loss.backward(retain_graph=False)
+            self.actor_optimizer.step()
 
-        self.actor_optimizer.zero_grad()
-        actor_loss.backward(retain_graph=False)
-        self.actor_optimizer.step()
-
-        self.critic_optimizer.zero_grad()
-        critic_loss.backward(retain_graph=False)
-        self.critic_optimizer.step()
-        # Logging
-        # logger.log(self.index)
+            self.critic_optimizer.zero_grad()
+            critic_loss.backward(retain_graph=False)
+            self.critic_optimizer.step()
+            return actor_loss, critic_loss
+        return None, None
 
     def get_action_probabilities(self, state: torch.Tensor) -> np.ndarray:
         """
@@ -383,9 +513,7 @@ class A2CNetworks:
         Returns:
             np.array: np.array representation of the action probabilities
         """
-        value = self.critic(state)
-
-        return torch.squeeze(value)
+        return torch.squeeze(self.critic(state))
 
     def save(self, folder: Path, name: str = "model") -> None:
         """
@@ -394,6 +522,7 @@ class A2CNetworks:
         Args:
             name (str, optional): [Name of the model]. Defaults to "model".
         """
+        print(f"Saving at {folder}/{name}_XXXX.pth")
         torch.save(self.actor, f"{folder}/{name}_actor.pth")
         torch.save(self.critic, f"{folder}/{name}_critic.pth")
 
