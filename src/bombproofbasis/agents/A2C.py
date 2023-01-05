@@ -1,7 +1,6 @@
 """
 A2C agent
 """
-import os
 from pathlib import Path
 from typing import Tuple, Union
 
@@ -9,14 +8,14 @@ import gym
 import numpy as np
 import torch
 from pydantic import PositiveInt
-from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 # Base class for Agent
 from bombproofbasis.agents.agent import Agent
 from bombproofbasis.network.network import BaseTorchNetwork
-from bombproofbasis.types import A2CConfig, BufferStep
+from bombproofbasis.types import A2CConfig, BufferStep, LoggingConfig
 from bombproofbasis.utils.buffer import RolloutBuffer
+from bombproofbasis.utils.logging import Logger
 
 # from bombproofbasis.utils.normalize import SimpleStandardizer
 
@@ -29,7 +28,9 @@ class A2C(Agent):
         Agent : Base Agent class
     """
 
-    def __init__(self, config: A2CConfig) -> None:
+    def __init__(
+        self, config: A2CConfig, log_config: LoggingConfig = LoggingConfig()
+    ) -> None:
         """
         Init the A2C components:
         -rollout buffer
@@ -44,8 +45,7 @@ class A2C(Agent):
         self.networks = A2CNetworks(config)
         self.t, self.t_global = 1, 1
         self.episode_reward, self.episode_num = 0, 0
-        os.makedirs(config.log_path, exist_ok=True)
-        self.writer = SummaryWriter(comment="statistics", log_dir=config.log_path)
+        self.logger = Logger(log_config)
 
     def save(self, folder: Path, name: str = "model"):
         """
@@ -107,10 +107,10 @@ class A2C(Agent):
             )
             if finished:
                 self.episode_num += 1
-                self.writer.add_scalar(
-                    "Reward/Episode", self.episode_reward, self.episode_num
+                self.logger.log(
+                    {"Reward/Episode": self.episode_reward, "Entropy": episode_entropy},
+                    self.episode_num,
                 )
-                self.writer.add_scalar("Entropy", episode_entropy, self.episode_num)
                 self.episode_reward = 0
                 break
         with torch.no_grad():
@@ -157,7 +157,7 @@ class A2C(Agent):
             t += 1
             self.t_global += 1
         self.episode_num += 1
-        self.writer.add_scalar("Reward/Episode", self.episode_reward, self.episode_num)
+        self.logger.log({"Reward/Episode": self.episode_reward}, self.episode_num)
         with torch.no_grad():
             final_value = self.networks.get_value(state=self.rollout.get_state(t))
         return final_value, episode_entropy
@@ -174,9 +174,9 @@ class A2C(Agent):
         actor_loss, critic_loss = self.networks.update(
             self.rollout, final_value, entropy
         )
-        if self.writer is not None and actor_loss is not None:
-            self.writer.add_scalar("Loss/Actor", actor_loss, self.t_global)
-            self.writer.add_scalar("Loss/Critic", critic_loss, self.t_global)
+        self.logger.log(
+            {"Loss/Actor": actor_loss, "Loss/Critic": critic_loss}, self.t_global
+        )
 
     def _train_n_step(self, env: gym.Env, n_updates: PositiveInt):
         """
@@ -306,28 +306,6 @@ class A2C(Agent):
         with torch.no_grad():
             return self.networks.critic(self.rollout.obs2tensor(observation)).item()
 
-
-# class Logger:
-#     """
-#     Logger for A2C agent. Used to handle the logging into wandb for the \
-#         agent's training.
-#     """
-
-#     def __init__(self, config: LoggingConfig) -> None:
-#         """Create the logger based on the config
-
-#         Args:
-#             config (LoggingConfig): Logger config
-#         """
-#         self.config = config
-
-#     def log(self, timestep: int) -> None:
-#         """
-#         Logs the relevant values into wandb
-
-#         Args:
-#             timestep (int): The current timestep
-#         """
 
 # if timestep % self.config.logging_frequency == 0:
 

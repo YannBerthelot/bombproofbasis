@@ -251,7 +251,7 @@ protobuf = ["grpcio-tools (>=1.51.1)"]
 
 [[package]]
 name = "gym"
-version = "0.26.0"
+version = "0.26.2"
 description = "Gym: A universal API for reinforcement learning environments"
 category = "main"
 optional = false
@@ -262,17 +262,18 @@ cloudpickle = ">=1.2.0"
 gym_notices = ">=0.0.4"
 importlib_metadata = {version = ">=4.8.0", markers = "python_version < \"3.10\""}
 numpy = ">=1.18.0"
+pygame = {version = "2.1.0", optional = true, markers = "extra == \"classic_control\""}
 
 [package.extras]
 accept-rom-license = ["autorom[accept-rom-license] (>=0.4.2,<0.5.0)"]
-all = ["moviepy (>=1.0.0)", "lz4 (>=3.1.0)", "matplotlib (>=3.0)", "box2d-py (==2.3.5)", "opencv-python (>=3.0)", "mujoco_py (>=2.1,<2.2)", "swig (>=4.0.0,<5.0.0)", "imageio (>=2.14.1)", "mujoco (==2.2.0)", "pytest (==7.0.1)", "pygame (==2.1.0)", "ale-py (>=0.8.0,<0.9.0)"]
+all = ["pygame (==2.1.0)", "box2d-py (==2.3.5)", "opencv-python (>=3.0)", "matplotlib (>=3.0)", "moviepy (>=1.0.0)", "swig (>=4.0.0,<5.0.0)", "lz4 (>=3.1.0)", "pytest (==7.0.1)", "mujoco_py (>=2.1,<2.2)", "mujoco (==2.2)", "ale-py (>=0.8.0,<0.9.0)", "imageio (>=2.14.1)"]
 atari = ["ale-py (>=0.8.0,<0.9.0)"]
 box2d = ["box2d-py (==2.3.5)", "pygame (==2.1.0)", "swig (>=4.0.0,<5.0.0)"]
 classic_control = ["pygame (==2.1.0)"]
-mujoco = ["mujoco (==2.2.0)", "imageio (>=2.14.1)"]
+mujoco = ["mujoco (==2.2)", "imageio (>=2.14.1)"]
 mujoco_py = ["mujoco_py (>=2.1,<2.2)"]
 other = ["lz4 (>=3.1.0)", "opencv-python (>=3.0)", "matplotlib (>=3.0)", "moviepy (>=1.0.0)"]
-testing = ["moviepy (>=1.0.0)", "lz4 (>=3.1.0)", "matplotlib (>=3.0)", "box2d-py (==2.3.5)", "opencv-python (>=3.0)", "mujoco_py (>=2.1,<2.2)", "swig (>=4.0.0,<5.0.0)", "imageio (>=2.14.1)", "mujoco (==2.2.0)", "pygame (==2.1.0)", "pytest (==7.0.1)"]
+testing = ["pygame (==2.1.0)", "box2d-py (==2.3.5)", "swig (>=4.0.0,<5.0.0)", "opencv-python (>=3.0)", "matplotlib (>=3.0)", "moviepy (>=1.0.0)", "lz4 (>=3.1.0)", "mujoco_py (>=2.1,<2.2)", "mujoco (==2.2)", "imageio (>=2.14.1)", "pytest (==7.0.1)"]
 toy_text = ["pygame (==2.1.0)"]
 
 [[package]]
@@ -611,6 +612,14 @@ name = "pyflakes"
 version = "2.5.0"
 description = "passive checker of Python programs"
 category = "dev"
+optional = false
+python-versions = ">=3.6"
+
+[[package]]
+name = "pygame"
+version = "2.1.0"
+description = "Python Game Development"
+category = "main"
 optional = false
 python-versions = ">=3.6"
 
@@ -1004,7 +1013,7 @@ testing = ["pytest (>=6)", "pytest-checkdocs (>=2.4)", "pytest-flake8", "pytest-
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.8"
-content-hash = "f727b201b6211a83a66a0fbf03460a97a3153357682a0d1a0a3b2a928a1a9ba8"
+content-hash = "7689214e8fc0e9dacd32976318d7d3566a053ffbe9778ad6905e0aa4dc3d3763"
 
 [metadata.files]
 absl-py = []
@@ -1063,6 +1072,7 @@ pyasn1-modules = []
 pycodestyle = []
 pydantic = []
 pyflakes = []
+pygame = []
 pyparsing = []
 pytest = []
 pyyaml = []

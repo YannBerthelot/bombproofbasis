@@ -90,8 +90,9 @@ class A2CConfig(AgentConfig):
 
 
 class LoggingConfig(BaseModel):
-    logging_output: str = "wandb"
-    logging_frequency: int = 100
+    logging_output: str = "tensorboard"
+    logging_frequency: int = 1
+    log_path: Path = Path("./logs")
 
     @validator("logging_output")
     def logging_match(cls, v: str) -> str:
