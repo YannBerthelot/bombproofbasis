@@ -5,7 +5,13 @@ import gym
 
 from bombproofbasis.agents.A2C import A2C
 from bombproofbasis.agents.utils import get_action_shape
-from bombproofbasis.types import A2CConfig, BufferConfig, NetworkConfig, ScalerConfig
+from bombproofbasis.types import (
+    A2CConfig,
+    BufferConfig,
+    LoggingConfig,
+    NetworkConfig,
+    ScalerConfig,
+)
 
 ENV = gym.make("CartPole-v1")
 action_shape = get_action_shape(ENV)
@@ -55,6 +61,8 @@ A2C_TD_CONFIG = A2CConfig(
     entropy_coeff=0.0,
 )
 
+logging_config = LoggingConfig()
+
 if __name__ == "__main__":
     # agent = A2C(A2C_MC_CONFIG)
     # print("ACTOR", agent.networks.actor)
@@ -65,7 +73,7 @@ if __name__ == "__main__":
     #     json.dump(train_report, outfile)
     # with open("test_report.json", "w") as outfile:
     #     json.dump(test_report, outfile)
-    agent = A2C(A2C_TD_CONFIG)
+    agent = A2C(A2C_TD_CONFIG, logging_config)
     print("ACTOR", agent.networks.actor)
     print("CRITIC", agent.networks.critic)
     agent.train(ENV, n_iter=int(20000 / buffer_size))
