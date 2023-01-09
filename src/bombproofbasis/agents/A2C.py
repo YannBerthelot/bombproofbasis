@@ -173,6 +173,9 @@ class A2C(Agent):
             self.t_global += 1
         self.episode_num += 1
         self.logger.log({"Reward/Episode": self.episode_reward}, self.episode_num)
+        self.logger.log_histograms(
+            self.rollout, self.networks, self.episode_num, weights=WEIGHTS
+        )
         with torch.no_grad():
             final_value = self.networks.get_value(state=self.rollout.get_state(t))
         return final_value, episode_entropy
@@ -192,12 +195,13 @@ class A2C(Agent):
         self.logger.log(
             {"Loss/Actor": actor_loss, "Loss/Critic": critic_loss}, self.t_global
         )
-        self.logger.writer.add_histogram(
-            "Histograms/Advantages", advantages, self.episode_num
-        )
-        self.logger.writer.add_histogram(
-            "Histograms/Value targets", targets, self.episode_num
-        )
+        if advantages is not None:
+            self.logger.add_histogram(
+                "Histograms/Advantages", advantages, self.episode_num
+            )
+            self.logger.add_histogram(
+                "Histograms/Value targets", targets, self.episode_num
+            )
 
     def _train_n_step(self, env: gym.Env, n_updates: PositiveInt):
         """
@@ -326,40 +330,6 @@ class A2C(Agent):
         observation = np.expand_dims(observation, axis=0)
         with torch.no_grad():
             return self.networks.critic(self.rollout.obs2tensor(observation)).item()
-
-
-# if timestep % self.config.logging_frequency == 0:
-
-#     if self.config["GLOBAL"]["logging"].lower() == "tensorboard":
-#         if self.writer:
-#             self.writer.add_scalar(
-#                 "Train/entropy loss", -entropy_loss, self.index
-#             )
-#             self.writer.add_scalar(
-#                 "Train/leaarning rate",
-#                 self.lr_scheduler.transform(self.index),
-#                 self.index,
-#             )
-#             self.writer.add_scalar("Train/policy loss", actor_loss, self.index)
-#             self.writer.add_scalar("Train/critic loss", critic_loss, self.index)
-#             # self.writer.add_scalar(
-#             #     "Train/explained variance", explained_variance, self.index
-#             # )
-#             # self.writer.add_scalar("Train/kl divergence", KL_divergence, self.index)
-#         else:
-#             warnings.warn("No Tensorboard writer available")
-#     elif self.config["GLOBAL"]["logging"].lower() == "wandb":
-#         wandb.log(
-#             {
-#                 "Train/entropy loss": -entropy_loss,
-#                 "Train/actor loss": actor_loss,
-#                 "Train/critic loss": critic_loss,
-#                 # "Train/explained variance": explained_variance,
-#                 # "Train/KL divergence": KL_divergence,
-#                 "Train/learning rate": self.lr_scheduler.transform(self.index),
-#             },
-#             commit=False,
-#         )
 
 
 class A2CNetworks:

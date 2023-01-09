@@ -3,6 +3,7 @@ import numpy as np
 import pytest
 import torch
 
+from bombproofbasis.agents.utils import get_obs_shape
 from bombproofbasis.types import BufferConfig
 from bombproofbasis.utils.buffer import BufferStep, RolloutBuffer
 
@@ -42,10 +43,15 @@ def MC_return_safe(buffer):
     # Computation checks
     rewards = np.array([REWARD_VALUE for i in range(buffer.config.buffer_size)])
     gamma = buffer.config.gamma
-    expected_return_MC_1 = rewards[0] + rewards[1] * gamma + rewards[2] * (gamma**2)
-    expected_return_MC_2 = rewards[0] + rewards[1] * gamma
-    expected_return_MC_3 = rewards[0]
-    expected_return_MC_4 = 0
+    expected_return_MC_1 = (
+        rewards[0]
+        + rewards[1] * gamma
+        + rewards[2] * (gamma**2)
+        + rewards[3] * (gamma**3)
+    )
+    expected_return_MC_2 = rewards[0] + rewards[1] * gamma + rewards[2] * (gamma**2)
+    expected_return_MC_3 = rewards[0] + rewards[1] * gamma
+    expected_return_MC_4 = rewards[0]
     returns_MC = [
         expected_return_MC_1,
         expected_return_MC_2,
@@ -58,25 +64,26 @@ def MC_return_safe(buffer):
 def test_add_buffer():
 
     obs, info = ENV.reset()
+    obs_shape = get_obs_shape(ENV)
     # faulty configs
     with pytest.raises(ValueError):
         faulty_buffer_config = BufferConfig(
-            obs_shape=obs.shape, gamma=1.99, setting="n-step"
+            obs_shape=obs_shape, gamma=1.99, setting="n-step"
         )
         RolloutBuffer(faulty_buffer_config)
     with pytest.raises(ValueError):
         faulty_buffer_config = BufferConfig(
-            obs_shape=obs.shape, buffer_size=-1, setting="n-step"
+            obs_shape=obs_shape, buffer_size=-1, setting="n-step"
         )
         RolloutBuffer(faulty_buffer_config)
     with pytest.raises(ValueError):
         faulty_buffer_config = BufferConfig(
-            obs_shape=obs.shape, n_steps=-1, setting="n-step"
+            obs_shape=obs_shape, n_steps=-1, setting="n-step"
         )
         RolloutBuffer(faulty_buffer_config)
     buffer_size = 10
     buffer_config = BufferConfig(
-        obs_shape=obs.shape, buffer_size=buffer_size, setting="n-step"
+        obs_shape=obs_shape, buffer_size=buffer_size, setting="n-step"
     )
     buffer = RolloutBuffer(buffer_config)
     for i in range(buffer_size - 1):
@@ -90,7 +97,8 @@ def test_add_buffer():
 
 def test_return_computation():
     obs, info = ENV.reset()
-    buffer_config = BufferConfig(obs_shape=obs.shape, buffer_size=4, setting="n-step")
+    obs_shape = get_obs_shape(ENV)
+    buffer_config = BufferConfig(obs_shape=obs_shape, buffer_size=4, setting="n-step")
     buffer = RolloutBuffer(buffer_config)
     buffer.internals.states[0].copy_(buffer.obs2tensor(obs))
     buffer = fill_buffer(buffer, done=True)

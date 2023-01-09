@@ -131,6 +131,59 @@ class RolloutBuffer:
 
     def compute_return(self, final_value: torch.Tensor) -> torch.Tensor:
         """
+        Wrapper function to compute return with right method.
+
+        Args:
+            final_value (torch.Tensor): Value of the final state according to the critic.
+
+        Raises:
+            ValueError: Unrecognized return computation setting
+
+        Returns:
+            torch.Tensor: The return
+        """
+        if self.config.setting == "MC":
+            return self.compute_return_MC(final_value)
+        elif self.config.setting == "n-step":
+            if self.config.n_steps == 1:
+                return self.compute_return_TD(final_value)
+            elif self.internals.len >= self.config.n_steps:
+                return self.compute_return_n_step(final_value)
+            return None
+        else:
+            raise ValueError(f"Unrecognized buffer setting : {self.config.setting}")
+
+    def compute_return_MC(self, final_value: torch.Tensor) -> torch.Tensor:
+        """
+        Compute return based on the internals of the buffer and the final \
+            value (critic value of the final state, which is not included in the buffer)
+
+        Args:
+            final_value (torch.Tensor): Value prediction from critic for the \
+                final state of the rollout
+
+        Returns:
+            torch.Tensor: The list of returns as a tensor of single item tensors
+        """
+        r_discounted = self._generate_buffer((self.internals.len, self.config.n_envs))
+        # Init return with final value (estimate of final reward if episode has not finished)
+        R = self._generate_buffer((1, self.config.n_envs)).masked_scatter(
+            (1 - self.internals.dones[self.internals.len - 1]), final_value
+        )
+
+        for i in reversed(range(self.internals.len)):
+            discounted_return = self.internals.rewards[i] + self.config.gamma * R
+            mask = torch.tensor(
+                [1]
+            )  # - self.internals.dones[i]  # wether or not to replace the current value by new one
+            R = self._generate_buffer((1, self.config.n_envs)).masked_scatter(
+                mask.bool(), discounted_return
+            )
+            r_discounted[i] = R
+        return r_discounted
+
+    def compute_return_TD(self, final_value: torch.Tensor) -> torch.Tensor:
+        """
         Compute return based on the internals of the buffer and the final \
             value (critic value of the final state, which is not included in the buffer)
 
@@ -156,7 +209,35 @@ class RolloutBuffer:
                 mask.bool(), discounted_return
             )
             r_discounted[i] = R
+        return r_discounted
 
+    def compute_return_n_step(self, final_value: torch.Tensor) -> torch.Tensor:
+        """
+        Compute return based on the internals of the buffer and the final \
+            value (critic value of the final state, which is not included in the buffer)
+
+        Args:
+            final_value (torch.Tensor): Value prediction from critic for the \
+                final state of the rollout
+
+        Returns:
+            torch.Tensor: The list of returns as a tensor of single item tensors
+        """
+        r_discounted = self._generate_buffer((self.internals.len, self.config.n_envs))
+        # Init return with final value (estimate of final reward if episode has not finished)
+        R = self._generate_buffer((1, self.config.n_envs)).masked_scatter(
+            (1 - self.internals.dones[-1]), final_value
+        )
+
+        for i in reversed(range(self.internals.len)):
+            discounted_return = self.internals.rewards[i] + self.config.gamma * R
+            mask = (
+                1 - self.internals.dones[i]
+            )  # wether or not to replace the current value by new one
+            R = self._generate_buffer((1, self.config.n_envs)).masked_scatter(
+                mask.bool(), discounted_return
+            )
+            r_discounted[i] = R
         return r_discounted
 
     @staticmethod
@@ -185,7 +266,7 @@ class RolloutBuffer:
 
     def compute_advantages(
         self, final_value: torch.Tensor
-    ) -> Union[torch.Tensor, None]:
+    ) -> Union[Tuple[torch.Tensor, torch.Tensor], None]:
         """
         Wrapper to compute advantages in either MC or n-step fashion
 
@@ -209,7 +290,7 @@ class RolloutBuffer:
                 return self.compute_advantages_n_step(
                     final_value, n_steps=self.config.n_steps
                 )
-            return None
+            return None, None
         else:
             raise ValueError(f"Unrecognized buffer setting : {self.config.setting}")
 
@@ -227,7 +308,7 @@ class RolloutBuffer:
                  compared to expectations from the critic)
         """
         returns = self.compute_return(final_value)
-        return returns - self.internals.values[: self.internals.len]
+        return returns - self.internals.values[: self.internals.len], returns
 
     def compute_advantages_n_step(
         self, final_value: torch.Tensor, n_steps: int = 1

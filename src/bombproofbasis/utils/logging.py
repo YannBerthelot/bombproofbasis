@@ -2,7 +2,7 @@
 Logging helpers
 """
 import os
-from typing import Dict, Union
+from typing import Any, Dict, Union
 
 from torch.utils.tensorboard import SummaryWriter
 
@@ -81,6 +81,22 @@ class Logger:
         ):
             self.log_tensorboard(scalars, timestep)
 
+    def add_histogram(self, name: str, values: Any, timestep: int) -> None:
+        """
+        Wrapper function for adding single histograms
+
+        Args:
+            name (str): Name of the graph
+            values (Any): Values to plot
+            timestep (int): The current timestep
+        """
+        if self.config.logging_output == "tensorboard":
+            self.writer.add_histogram(
+                name,
+                values,
+                timestep,
+            )
+
     def log_histograms(
         self,
         rollout,
@@ -98,19 +114,22 @@ class Logger:
             weights (bool, optional): Wether or not to plot networks \
                 weights. Defaults to False.
         """
-        self.writer.add_histogram(
-            "Histograms/Values",
-            rollout.internals.values[: rollout.internals.len],
-            timestep,
-        )
-        self.writer.add_histogram(
-            "Histograms/Rewards",
-            rollout.internals.rewards[: rollout.internals.len],
-            timestep,
-        )
-        if weights and (timestep % 10 == 0):
-            for name, weight in networks.actor.named_parameters():
-                self.writer.add_histogram(f"Weights/{name} actor", weight, timestep)
+        if self.config.logging_output == "tensorboard":
+            self.writer.add_histogram(
+                "Histograms/Values",
+                rollout.internals.values[: rollout.internals.len],
+                timestep,
+            )
+            self.writer.add_histogram(
+                "Histograms/Rewards",
+                rollout.internals.rewards[: rollout.internals.len],
+                timestep,
+            )
+            if weights and (timestep % 10 == 0):
+                for name, weight in networks.actor.named_parameters():
+                    self.writer.add_histogram(f"Weights/{name} actor", weight, timestep)
 
-            for name, weight in networks.critic.named_parameters():
-                self.writer.add_histogram(f"Weights/{name} critic", weight, timestep)
+                for name, weight in networks.critic.named_parameters():
+                    self.writer.add_histogram(
+                        f"Weights/{name} critic", weight, timestep
+                    )
