@@ -2,7 +2,7 @@
 Buffer components
 """
 
-from typing import Union
+from typing import Tuple, Union
 
 import numpy as np
 import torch
@@ -50,12 +50,12 @@ class RolloutBuffer:
         if self.config.setting == "MC":
             buffer_size = 1000
         else:
-            if not self.config.buffer_size >= 2 * self.config.n_steps + 1:
+            if not self.config.buffer_size >= self.config.n_steps:
                 raise ValueError(
                     f"Buffer size is not big enough for selected n-steps. \
                         Buffer size : {self.config.buffer_size}, n-steps : \
                         {self.config.n_steps}, buffer size should be at \
-                        least {2 * self.config.n_steps + 1}"
+                        least {self.config.n_steps}"
                 )
             buffer_size = self.config.buffer_size  # + self.config.n_steps
         self.internals = BufferInternals(
@@ -66,7 +66,7 @@ class RolloutBuffer:
             entropies=torch.zeros((buffer_size, 1)),
             returns=torch.zeros((buffer_size, 1)),
             advantages=torch.zeros((buffer_size, 1)),
-            states=torch.zeros((buffer_size + 1, 1, self.config.obs_shape[0])),
+            states=torch.zeros((buffer_size + 1, 1, self.config.obs_shape)),
             actions=torch.zeros((buffer_size, 1)),
             len=0,
         )
@@ -231,7 +231,7 @@ class RolloutBuffer:
 
     def compute_advantages_n_step(
         self, final_value: torch.Tensor, n_steps: int = 1
-    ) -> torch.Tensor:
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Compute advantages based on the buffer storage and the final value.
 
@@ -251,20 +251,16 @@ class RolloutBuffer:
             self.internals.values[n_steps : (self.internals.len + 1 - int(done))]
         )
         next_values[-1].copy_(final_value)
-        # print(
-        #     "last",
-        #     returns,
-        #     next_values,
-        #     self.internals.values[: self.internals.len - n_steps + 1],
-        # )
-        advantages = (
+        expected_value = (
             returns[: self.internals.len - n_steps + 1]
             + (1 - self.internals.dones[: self.internals.len - n_steps + 1])
             * (self.config.gamma**n_steps)
             * next_values
-            - self.internals.values[: self.internals.len - n_steps + 1]
         )
-        return advantages
+        advantages = (
+            expected_value - self.internals.values[: self.internals.len - n_steps + 1]
+        )
+        return advantages, expected_value
 
     def after_update(self):
         """

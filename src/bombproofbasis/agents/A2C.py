@@ -19,6 +19,8 @@ from bombproofbasis.utils.logging import Logger
 
 # from bombproofbasis.utils.normalize import SimpleStandardizer
 
+WEIGHTS = False
+
 
 class A2C(Agent):
     """
@@ -46,6 +48,13 @@ class A2C(Agent):
         self.t, self.t_global = 1, 1
         self.episode_reward, self.episode_num = 0, 0
         self.logger = Logger(log_config)
+        probs = torch.tensor(
+            [
+                1 / self.networks.actor.config.input_shape
+                for _ in range(self.networks.actor.config.input_shape)
+            ]
+        )
+        self.max_entropy = torch.distributions.Categorical(probs=probs).entropy().item()
 
     def save(self, folder: Path, name: str = "model"):
         """
@@ -92,7 +101,7 @@ class A2C(Agent):
             action, log_prob, entropy = self.networks.select_action(state)
             obs, reward, done, truncated, _ = env.step(action)
             self.episode_reward += reward
-            episode_entropy += entropy
+            episode_entropy += entropy / self.max_entropy
             self.t_global += 1
             finished = done or truncated
             self.rollout.add(
@@ -108,8 +117,14 @@ class A2C(Agent):
             if finished:
                 self.episode_num += 1
                 self.logger.log(
-                    {"Reward/Episode": self.episode_reward, "Entropy": episode_entropy},
+                    {
+                        "Reward/Episode": self.episode_reward,
+                        "Relative Entropy": episode_entropy / (step + 1),
+                    },
                     self.episode_num,
+                )
+                self.logger.log_histograms(
+                    self.rollout, self.networks, self.episode_num, weights=WEIGHTS
                 )
                 self.episode_reward = 0
                 break
@@ -171,11 +186,17 @@ class A2C(Agent):
             final_value (torch.Tensor): The estimation of the value, by the \
                 critic, of the final state of the rollout.
         """
-        actor_loss, critic_loss = self.networks.update(
+        actor_loss, critic_loss, advantages, targets = self.networks.update(
             self.rollout, final_value, entropy
         )
         self.logger.log(
             {"Loss/Actor": actor_loss, "Loss/Critic": critic_loss}, self.t_global
+        )
+        self.logger.writer.add_histogram(
+            "Histograms/Advantages", advantages, self.episode_num
+        )
+        self.logger.writer.add_histogram(
+            "Histograms/Value targets", targets, self.episode_num
         )
 
     def _train_n_step(self, env: gym.Env, n_updates: PositiveInt):
@@ -428,7 +449,7 @@ class A2CNetworks:
 
     def update(
         self, buffer: RolloutBuffer, final_value: torch.Tensor, entropy: torch.Tensor
-    ) -> Union[Tuple[torch.Tensor, torch.Tensor], None]:
+    ) -> Union[Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor], None]:
         """
         Update the nework's weights according to A2C rule.
 
@@ -441,7 +462,7 @@ class A2CNetworks:
         torch.autograd.set_detect_anomaly(True)
         self.index += 1
         n_steps = 0 if buffer.config.setting == "MC" else buffer.config.n_steps - 1
-        advantages = buffer.compute_advantages(final_value)
+        advantages, target = buffer.compute_advantages(final_value)
         if advantages is not None:
             actor_loss, critic_loss = self.A2C_loss(
                 buffer.internals.log_probs[: buffer.internals.len - n_steps],
@@ -455,8 +476,8 @@ class A2CNetworks:
             self.critic_optimizer.zero_grad()
             critic_loss.backward(retain_graph=False)
             self.critic_optimizer.step()
-            return actor_loss, critic_loss
-        return None, None
+            return actor_loss, critic_loss, advantages, target
+        return None, None, None, None
 
     def get_action_probabilities(self, state: torch.Tensor) -> np.ndarray:
         """

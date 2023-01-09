@@ -46,8 +46,11 @@ class Logger:
         """
         self.config = config
         if self.config.logging_output == "tensorboard":
-            os.makedirs(config.log_path, exist_ok=True)
-            self.writer = SummaryWriter(comment="statistics", log_dir=config.log_path)
+            log_dir = os.path.join(config.log_path, config.run_name)
+            os.makedirs(log_dir, exist_ok=True)
+            self.writer = SummaryWriter(log_dir=log_dir)
+
+            # SERIALIZE CONFIG INTO FOLDER
 
     def log_tensorboard(
         self, scalars: Dict[str, Union[int, float]], timestep: int
@@ -72,5 +75,42 @@ class Logger:
             timestep (int): The current timestep
         """
 
-        if self.config.logging_output == "tensorboard":
+        if (
+            self.config.logging_output == "tensorboard"
+            and timestep % self.config.logging_frequency == 0
+        ):
             self.log_tensorboard(scalars, timestep)
+
+    def log_histograms(
+        self,
+        rollout,
+        networks,
+        timestep: int,
+        weights: bool = False,
+    ) -> None:
+        """
+        Log interesting KPIs distributions in histograms
+
+        Args:
+            rollout (RolloutBuffer): Rollout to extract values from
+            networks (A2CNetworks): Networks for weights plotting
+            timestep (int): The current timestep
+            weights (bool, optional): Wether or not to plot networks \
+                weights. Defaults to False.
+        """
+        self.writer.add_histogram(
+            "Histograms/Values",
+            rollout.internals.values[: rollout.internals.len],
+            timestep,
+        )
+        self.writer.add_histogram(
+            "Histograms/Rewards",
+            rollout.internals.rewards[: rollout.internals.len],
+            timestep,
+        )
+        if weights and (timestep % 10 == 0):
+            for name, weight in networks.actor.named_parameters():
+                self.writer.add_histogram(f"Weights/{name} actor", weight, timestep)
+
+            for name, weight in networks.critic.named_parameters():
+                self.writer.add_histogram(f"Weights/{name} critic", weight, timestep)
