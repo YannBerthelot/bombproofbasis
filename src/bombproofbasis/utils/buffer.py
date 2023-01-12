@@ -1,7 +1,6 @@
 """
 Buffer components
 """
-
 from typing import Tuple, Union
 
 import numpy as np
@@ -50,12 +49,14 @@ class RolloutBuffer:
         if self.config.setting == "MC":
             buffer_size = 1000
         else:
-            if not self.config.buffer_size >= self.config.n_steps:
+            if not (self.config.buffer_size >= self.config.n_steps + 1) and (
+                self.config.n_steps > 1
+            ):
                 raise ValueError(
                     f"Buffer size is not big enough for selected n-steps. \
                         Buffer size : {self.config.buffer_size}, n-steps : \
                         {self.config.n_steps}, buffer size should be at \
-                        least {self.config.n_steps}"
+                        least {self.config.n_steps+1}"
                 )
             buffer_size = self.config.buffer_size  # + self.config.n_steps
         self.internals = BufferInternals(
@@ -117,7 +118,7 @@ class RolloutBuffer:
         self.internals.dones[self.internals.len].copy_(step.done)
         self.internals.len += 1
 
-    def _generate_buffer(self, shape: tuple) -> torch.Tensor:
+    def _generate_buffer(self, shape: Union[int, tuple]) -> torch.Tensor:
         """
         Create a torch tensor of zeros of the relevant shape
 
@@ -129,7 +130,7 @@ class RolloutBuffer:
         """
         return torch.zeros(shape)
 
-    def compute_return(self, final_value: torch.Tensor) -> torch.Tensor:
+    def compute_return(self) -> torch.Tensor:
         """
         Wrapper function to compute return with right method.
 
@@ -143,17 +144,17 @@ class RolloutBuffer:
             torch.Tensor: The return
         """
         if self.config.setting == "MC":
-            return self.compute_return_MC(final_value)
+            return self.compute_return_MC()
         elif self.config.setting == "n-step":
             if self.config.n_steps == 1:
-                return self.compute_return_TD(final_value)
-            elif self.internals.len >= self.config.n_steps:
-                return self.compute_return_n_step(final_value)
+                return self.compute_return_TD()
+            elif self.config.buffer_size >= self.config.n_steps + 1:
+                return self.compute_return_n_step()
             return None
         else:
             raise ValueError(f"Unrecognized buffer setting : {self.config.setting}")
 
-    def compute_return_MC(self, final_value: torch.Tensor) -> torch.Tensor:
+    def compute_return_MC(self) -> torch.Tensor:
         """
         Compute return based on the internals of the buffer and the final \
             value (critic value of the final state, which is not included in the buffer)
@@ -166,23 +167,15 @@ class RolloutBuffer:
             torch.Tensor: The list of returns as a tensor of single item tensors
         """
         r_discounted = self._generate_buffer((self.internals.len, self.config.n_envs))
-        # Init return with final value (estimate of final reward if episode has not finished)
-        R = self._generate_buffer((1, self.config.n_envs)).masked_scatter(
-            (1 - self.internals.dones[self.internals.len - 1]), final_value
-        )
+        R = self._generate_buffer((1, self.config.n_envs))
 
         for i in reversed(range(self.internals.len)):
             discounted_return = self.internals.rewards[i] + self.config.gamma * R
-            mask = torch.tensor(
-                [1]
-            )  # - self.internals.dones[i]  # wether or not to replace the current value by new one
-            R = self._generate_buffer((1, self.config.n_envs)).masked_scatter(
-                mask.bool(), discounted_return
-            )
+            R = self._generate_buffer((1, self.config.n_envs)).copy_(discounted_return)
             r_discounted[i] = R
         return r_discounted
 
-    def compute_return_TD(self, final_value: torch.Tensor) -> torch.Tensor:
+    def compute_return_TD(self) -> torch.Tensor:
         """
         Compute return based on the internals of the buffer and the final \
             value (critic value of the final state, which is not included in the buffer)
@@ -194,24 +187,9 @@ class RolloutBuffer:
         Returns:
             torch.Tensor: The list of returns as a tensor of single item tensors
         """
-        r_discounted = self._generate_buffer((self.internals.len, self.config.n_envs))
-        # Init return with final value (estimate of final reward if episode has not finished)
-        R = self._generate_buffer((1, self.config.n_envs)).masked_scatter(
-            (1 - self.internals.dones[-1]), final_value
-        )
+        return self.internals.rewards
 
-        for i in reversed(range(self.internals.len)):
-            discounted_return = self.internals.rewards[i] + self.config.gamma * R
-            mask = (
-                1 - self.internals.dones[i]
-            )  # wether or not to replace the current value by new one
-            R = self._generate_buffer((1, self.config.n_envs)).masked_scatter(
-                mask.bool(), discounted_return
-            )
-            r_discounted[i] = R
-        return r_discounted
-
-    def compute_return_n_step(self, final_value: torch.Tensor) -> torch.Tensor:
+    def compute_return_n_step(self) -> torch.Tensor:
         """
         Compute return based on the internals of the buffer and the final \
             value (critic value of the final state, which is not included in the buffer)
@@ -223,21 +201,25 @@ class RolloutBuffer:
         Returns:
             torch.Tensor: The list of returns as a tensor of single item tensors
         """
-        r_discounted = self._generate_buffer((self.internals.len, self.config.n_envs))
-        # Init return with final value (estimate of final reward if episode has not finished)
-        R = self._generate_buffer((1, self.config.n_envs)).masked_scatter(
-            (1 - self.internals.dones[-1]), final_value
+        r_discounted = self._generate_buffer(
+            (min(self.internals.len, self.config.n_steps), self.config.n_envs)
         )
 
-        for i in reversed(range(self.internals.len)):
-            discounted_return = self.internals.rewards[i] + self.config.gamma * R
-            mask = (
-                1 - self.internals.dones[i]
-            )  # wether or not to replace the current value by new one
-            R = self._generate_buffer((1, self.config.n_envs)).masked_scatter(
-                mask.bool(), discounted_return
-            )
-            r_discounted[i] = R
+        for i in range(min(self.internals.len, self.config.n_steps)):
+            rewards = self.internals.rewards[
+                i : min(self.internals.len, self.config.n_steps) + i
+            ]
+            dones = self.internals.dones[
+                i : min(self.internals.len, self.config.n_steps) + i
+            ]
+            R = self._generate_buffer(self.config.n_envs)
+            for j in reversed(range(len(rewards))):
+                discounted_return = rewards[j] + self.config.gamma * R
+                mask = 1 - dones[j]
+                R = self._generate_buffer(self.config.n_envs).masked_scatter(
+                    mask.bool(), discounted_return
+                )
+            r_discounted[i].copy_(R)
         return r_discounted
 
     @staticmethod
@@ -284,17 +266,17 @@ class RolloutBuffer:
                 the n-step advantages (due to not having the n-step value)
         """
         if self.config.setting == "MC":
-            return self.compute_advantages_MC(final_value)
+            return self.compute_advantages_MC()
         elif self.config.setting == "n-step":
-            if self.internals.len >= self.config.n_steps:
-                return self.compute_advantages_n_step(
-                    final_value, n_steps=self.config.n_steps
-                )
+            if self.config.n_steps == 1:
+                return self.compute_advantages_TD(final_value)
+            elif self.config.n_steps > 1:
+                return self.compute_advantages_n_step(final_value)
             return None, None
         else:
             raise ValueError(f"Unrecognized buffer setting : {self.config.setting}")
 
-    def compute_advantages_MC(self, final_value: torch.Tensor) -> torch.Tensor:
+    def compute_advantages_MC(self) -> torch.Tensor:
         """
         Compute advantages based on the buffer storage and the final value in \
             a Monte-Carlo fashion (full episode, no need to predict next state \
@@ -307,11 +289,11 @@ class RolloutBuffer:
             torch.Tensor: Tensor of advantages (how good were the states when\
                  compared to expectations from the critic)
         """
-        returns = self.compute_return(final_value)
+        returns = self.compute_return()
         return returns - self.internals.values[: self.internals.len], returns
 
-    def compute_advantages_n_step(
-        self, final_value: torch.Tensor, n_steps: int = 1
+    def compute_advantages_TD(
+        self, final_value: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Compute advantages based on the buffer storage and the final value.
@@ -323,41 +305,119 @@ class RolloutBuffer:
             torch.Tensor: Tensor of advantages (how good were the states when\
                  compared to expectations from the critic)
         """
-        returns = self.compute_return(final_value)
-        next_values = self._generate_buffer(
-            (self.internals.len - n_steps + 1, self.config.n_envs)
-        )
-        done = self.internals.dones.max() > 0
+        returns = self.compute_return()[: self.internals.len]
+        next_values = self._generate_buffer((self.internals.len, self.config.n_envs))
         next_values[:-1].copy_(
-            self.internals.values[n_steps : (self.internals.len + 1 - int(done))]
+            self.internals.values[self.config.n_steps : self.internals.len]
         )
         next_values[-1].copy_(final_value)
         expected_value = (
-            returns[: self.internals.len - n_steps + 1]
-            + (1 - self.internals.dones[: self.internals.len - n_steps + 1])
-            * (self.config.gamma**n_steps)
+            returns
+            + (1 - self.internals.dones[: self.internals.len])
+            * (self.config.gamma**self.config.n_steps)
+            * next_values
+        )
+        advantages = expected_value - self.internals.values[: self.config.n_steps]
+        return advantages, expected_value
+
+    def compute_advantages_n_step(
+        self, final_value: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Compute advantages based on the buffer storage and the final value.
+
+        Args:
+            final_value (torch.Tensor): Final value from the critic
+
+        Returns:
+            torch.Tensor: Tensor of advantages (how good were the states when\
+                 compared to expectations from the critic)
+        """
+        done = self.internals.dones.max() > 0
+        # returns = [
+        #     self.compute_return(
+        #         self.internals.rewards[i : min(self.internals.len, n_steps) + i],
+        #         self.internals.dones[i : min(self.internals.len, n_steps) + i],
+        #     )
+        #     for i in range(min(self.internals.len, n_steps))
+        # ]
+        returns = self.compute_return()
+        next_values = self._generate_buffer(
+            (
+                self.internals.len
+                - 1
+                + int(done)
+                - int(self.internals.dones[1:].max().item()),
+                self.config.n_envs,
+            )
+        )
+        next_values[:-1].copy_(self.internals.values[self.config.n_steps :])
+        next_values[-1].copy_(final_value)
+        expected_value = (
+            returns
+            + (1 - self.internals.dones[1:])
+            * (self.config.gamma**self.config.n_steps)
             * next_values
         )
         advantages = (
-            expected_value - self.internals.values[: self.internals.len - n_steps + 1]
+            expected_value
+            - self.internals.values[
+                : self.internals.len - 1 + int(self.internals.dones[0])
+            ]
         )
         return advantages, expected_value
 
-    def after_update(self):
+    def after_update(self, agent=None):
         """
         Cleaning up buffers after a rollout is finished and
         copying the last state to index 0
         :return:
         """
 
-        self.internals.states[0].copy_(self.internals.states[-1])
-        self.internals.actions = self._generate_buffer(
-            (self.config.buffer_size, self.config.n_envs)
-        )
-        self.internals.log_probs = self._generate_buffer(
-            (self.config.buffer_size, self.config.n_envs)
-        )
-        self.internals.values = self._generate_buffer(
-            (self.config.buffer_size, self.config.n_envs)
-        )
-        self.internals.len = 0
+        if self.config.n_steps > 1:
+            step = BufferStep(
+                reward=self.internals.rewards[-1].item(),
+                obs=self.internals.states[-1].detach().numpy(),
+                action=int(self.internals.actions[-1].detach().item()),
+                log_prob=agent.networks.get_log_prob(
+                    self.internals.states[-2].clone(),
+                    self.internals.actions[-1].detach(),
+                ),
+                value=agent.networks.get_value(state=self.internals.states[-2].clone()),
+                done=False,
+            )
+            self.internals.states[0].copy_(self.internals.states[-1])
+            self.internals.values = self._generate_buffer(
+                (self.config.buffer_size, self.config.n_envs)
+            )
+            self.internals.actions = self._generate_buffer(
+                (self.config.buffer_size, self.config.n_envs)
+            )
+            self.internals.log_probs = self._generate_buffer(
+                (self.config.buffer_size, self.config.n_envs)
+            )
+
+            self.internals.dones = self._generate_buffer(
+                (self.config.buffer_size, self.config.n_envs)
+            )
+
+            self.internals.len = 0
+            self.add(step)
+
+        else:
+            self.internals.states[0].copy_(self.internals.states[-1])
+            self.internals.values = self._generate_buffer(
+                (self.config.buffer_size, self.config.n_envs)
+            )
+            self.internals.actions = self._generate_buffer(
+                (self.config.buffer_size, self.config.n_envs)
+            )
+            self.internals.log_probs = self._generate_buffer(
+                (self.config.buffer_size, self.config.n_envs)
+            )
+
+            self.internals.dones = self._generate_buffer(
+                (self.config.buffer_size, self.config.n_envs)
+            )
+
+            self.internals.len = 0

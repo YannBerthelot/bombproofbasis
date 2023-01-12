@@ -51,33 +51,35 @@ A2C_CONFIG = A2CConfig(
 )
 
 
-# def test_A2CNetworks():
-#     networks = A2CNetworks(A2C_CONFIG)
-#     buffer = RolloutBuffer(networks.config.buffer)
-#     buffer = fill_buffer(buffer, done=True)
-#     obs, info = ENV.reset()
-#     action, log_prob = networks.select_action(observation=buffer.obs2tensor(obs))
-#     assert isinstance(action, int)
-#     # log_prob = vals
+def test_A2CNetworks():
+    networks = A2CNetworks(A2C_CONFIG)
+    buffer = RolloutBuffer(networks.config.buffer)
+    buffer = fill_buffer(buffer, done=True)
+    obs, info = ENV.reset()
+    action, log_prob, entropy = networks.select_action(
+        observation=buffer.obs2tensor(obs)
+    )
+    assert isinstance(action, int)
+    # log_prob = vals
 
-#     action_probas = networks.get_action_probabilities(buffer.obs2tensor(obs))
-#     for proba in action_probas:
-#         assert 0 <= proba <= 1
-#     value = networks.get_value(state=buffer.obs2tensor(obs))
+    action_probas = networks.get_action_probabilities(buffer.obs2tensor(obs))
+    for proba in action_probas:
+        assert 0 <= proba <= 1
+    value = networks.get_value(state=buffer.obs2tensor(obs))
 
-#     # Test saving
-#     model_folder = "./models"
-#     os.makedirs(model_folder, exist_ok=True)
-#     networks.save(folder=model_folder)
-#     del networks
-#     new_networks = A2CNetworks(A2C_CONFIG)
-#     new_networks.load(folder=model_folder)
-#     shutil.rmtree(model_folder)
-#     assert torch.equal(new_networks.get_value(state=buffer.obs2tensor(obs)), value)
-#     assert (
-#         action_probas.all()
-#         == new_networks.get_action_probabilities(buffer.obs2tensor(obs)).all()
-#     )
+    # Test saving
+    model_folder = "./models"
+    os.makedirs(model_folder, exist_ok=True)
+    networks.save(folder=model_folder)
+    del networks
+    new_networks = A2CNetworks(A2C_CONFIG)
+    new_networks.load(folder=model_folder)
+    shutil.rmtree(model_folder)
+    assert torch.equal(new_networks.get_value(state=buffer.obs2tensor(obs)), value)
+    assert (
+        action_probas.all()
+        == new_networks.get_action_probabilities(buffer.obs2tensor(obs)).all()
+    )
 
 
 def check_difference_in_policy(networks, obs, old_action_proba):
@@ -127,37 +129,41 @@ def test_A2C_basics():
     agent.get_value(obs)
 
 
-# def test_A2C_train_test():
-#     # MC
-#     MC_agent = A2C(A2C_CONFIG, LoggingConfig(logging_output=None))
-#     n_episodes = 3
-#     MC_agent.train(ENV, n_iter=n_episodes)
-#     MC_agent.test(ENV, n_episodes=n_episodes)
-#     # TD (1-step)
-#     buffer_config = BufferConfig(obs_shape=obs_shape, setting="n-step", n_steps=1)
-#     n_step_A2C_CONFIG = A2CConfig(
-#         environment=ENV,
-#         agent_type="A2C",
-#         policy_network=policy_network_config,
-#         value_network=value_network_config,
-#         scaler=scaler_config,
-#         buffer=buffer_config,
-#     )
-#     n_step_agent = A2C(n_step_A2C_CONFIG, LoggingConfig(logging_output=None))
-#     n_episodes = 100
-#     n_step_agent.train(ENV, n_iter=n_episodes)
-#     n_step_agent.test(ENV, n_episodes=10, render=True)
-#     # 2-step
-#     buffer_config = BufferConfig(obs_shape=obs_shape, setting="n-step", n_steps=2)
-#     n_step_A2C_CONFIG = A2CConfig(
-#         environment=ENV,
-#         agent_type="A2C",
-#         policy_network=policy_network_config,
-#         value_network=value_network_config,
-#         scaler=scaler_config,
-#         buffer=buffer_config,
-#     )
-#     n_step_agent = A2C(n_step_A2C_CONFIG, LoggingConfig(logging_output=None))
-#     n_episodes = 100
-#     n_step_agent.train(ENV, n_iter=n_episodes)
-#     n_step_agent.test(ENV, n_episodes=10, render=False)
+def test_A2C_train_test():
+    # MC
+    MC_agent = A2C(A2C_CONFIG, LoggingConfig(logging_output=None))
+    n_episodes = 3
+    MC_agent.train(ENV, n_iter=n_episodes)
+    MC_agent.test(ENV, n_episodes=n_episodes)
+
+    # TD (1-step)
+    buffer_config = BufferConfig(obs_shape=obs_shape, setting="n-step", n_steps=1)
+    n_step_A2C_CONFIG = A2CConfig(
+        environment=ENV,
+        agent_type="A2C",
+        policy_network=policy_network_config,
+        value_network=value_network_config,
+        scaler=scaler_config,
+        buffer=buffer_config,
+    )
+    n_step_agent = A2C(n_step_A2C_CONFIG, LoggingConfig(logging_output=None))
+    n_episodes = 100
+    n_step_agent.train(ENV, n_iter=n_episodes)
+    n_step_agent.test(ENV, n_episodes=10, render=False)
+
+    # 2-step 1-update
+    buffer_config = BufferConfig(
+        obs_shape=obs_shape, setting="n-step", n_steps=2, buffer_size=3
+    )
+    n_step_A2C_CONFIG = A2CConfig(
+        environment=ENV,
+        agent_type="A2C",
+        policy_network=policy_network_config,
+        value_network=value_network_config,
+        scaler=scaler_config,
+        buffer=buffer_config,
+    )
+    n_step_agent = A2C(n_step_A2C_CONFIG, LoggingConfig(logging_output=None))
+    n_episodes = 100
+    n_step_agent.train(ENV, n_iter=n_episodes)
+    n_step_agent.test(ENV, n_episodes=10, render=False)

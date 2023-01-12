@@ -96,7 +96,7 @@ class A2C(Agent):
                 - The cumulative entropy of the rollout.
         """
         episode_entropy = 0
-        for step in range(n_timesteps):
+        for step in range(n_timesteps - self.rollout.internals.len):
             state = self.rollout.get_state(step)
             action, log_prob, entropy = self.networks.select_action(state)
             obs, reward, done, truncated, _ = env.step(action)
@@ -128,10 +128,7 @@ class A2C(Agent):
                 )
                 self.episode_reward = 0
                 break
-        with torch.no_grad():
-            final_value = self.networks.get_value(
-                state=self.rollout.get_state(step + 1)
-            )
+        final_value = self.networks.get_value(state=self.rollout.get_state(step + 1))
         return final_value, env, finished, episode_entropy
 
     def collect_episode(self, env: gym.Env) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -166,7 +163,7 @@ class A2C(Agent):
                     action=action,
                     log_prob=log_prob,
                     value=value,
-                    done=done,
+                    done=done or truncated,
                 )
             )
             t += 1
@@ -203,7 +200,7 @@ class A2C(Agent):
                 "Histograms/Value targets", targets, self.episode_num
             )
 
-    def _train_n_step(self, env: gym.Env, n_updates: PositiveInt):
+    def _train_TD(self, env: gym.Env, n_updates: PositiveInt):
         """
         Train the agent for n_updates in an n-step fashion.
 
@@ -224,6 +221,29 @@ class A2C(Agent):
                 self.rollout.reset()
                 self.rollout.internals.states[0].copy_(self.rollout.obs2tensor(obs))
 
+        env.close()
+
+    def _train_n_step(self, env: gym.Env, n_updates: PositiveInt):
+        """
+        Train the agent for n_updates in an n-step fashion.
+
+        Args:
+            env (gym.Env): The env to use for training.
+            n_updates (int): How much updates to do.
+        """
+        obs, _ = env.reset()
+        self.rollout.internals.states[0].copy_(self.rollout.obs2tensor(obs))
+        for _ in tqdm(range(n_updates)):
+            final_value, env, terminated, entropy = self.collect_rollout(
+                env, self.rollout.config.buffer_size
+            )
+            self.update_policy(final_value, entropy)
+            if terminated:
+                obs, _ = env.reset()
+                self.rollout.reset()
+                self.rollout.internals.states[0].copy_(self.rollout.obs2tensor(obs))
+            else:
+                self.rollout.after_update(self)
         env.close()
 
     def _train_MC(self, env: gym.Env, n_episodes: int):
@@ -380,23 +400,38 @@ class A2CNetworks:
         Also returns relevant elements for updating the networks.
 
         Args:
-            observation (np.ndarray): The observation of the environment to \
+            observation (torch.Tensor): The observation of the environment to \
                 consider
-            hiddens (Dict[int, Tuple[torch.Tensor, torch.Tensor]]): \
-                The hidden(s) state(s) of the actor network
+
 
         Returns:
-            Tuple[ int, Dict[int, Tuple[torch.Tensor, torch.Tensor]],\
-                 Tuple[torch.Tensor, torch.Tensor, torch.Tensor], ]:\
-                    The selected action, the new hidden(s) state(s), \
-                        the relevant features for the A2C update \
-                            (log_prob,entropy and KL div)
+            Tuple[int, torch.Tensor, torch.Tensor]: The selected action, its\
+                 log probability and the entropy of the policy in that state.
         """
         probs = self.actor(observation)
         dist = torch.distributions.Categorical(probs=probs)
         action = dist.sample().detach()
         log_prob = dist.log_prob(action)
         return int(action.item()), log_prob, dist.entropy().mean()
+
+    def get_log_prob(
+        self, observation: torch.Tensor, action: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Wrapper to get the log probability of an action after a given obs for \
+            the current state of the actor.
+
+        Args:
+            observation (torch.Tensor): The observation ton consider for policy.
+            action (torch.Tensor): The action for which to compute log prob.
+
+        Returns:
+            torch.Tensor: The current log prob of the action in the given obs.
+        """
+        probs = self.actor(observation)
+        dist = torch.distributions.Categorical(probs=probs)
+        log_prob = dist.log_prob(action)
+        return log_prob
 
     def A2C_loss(
         self, log_prob: torch.Tensor, advantage: torch.Tensor, entropy: torch.Tensor
@@ -431,12 +466,16 @@ class A2CNetworks:
         # For logging purposes
         torch.autograd.set_detect_anomaly(True)
         self.index += 1
-        n_steps = 0 if buffer.config.setting == "MC" else buffer.config.n_steps - 1
         advantages, target = buffer.compute_advantages(final_value)
+        val = int(
+            (min(buffer.config.n_steps, buffer.internals.dones.argmax() + 1))
+            * buffer.internals.dones.max().item()
+            + buffer.config.n_steps * (1 - buffer.internals.dones.max().item())
+        )
         if advantages is not None:
             actor_loss, critic_loss = self.A2C_loss(
-                buffer.internals.log_probs[: buffer.internals.len - n_steps],
-                advantages[: buffer.internals.len],
+                buffer.internals.log_probs[:val],
+                advantages,
                 entropy,
             )
             self.actor_optimizer.zero_grad()
@@ -449,23 +488,21 @@ class A2CNetworks:
             return actor_loss, critic_loss, advantages, target
         return None, None, None, None
 
-    def get_action_probabilities(self, state: torch.Tensor) -> np.ndarray:
+    def get_action_probabilities(self, state: torch.Tensor) -> torch.Tensor:
         """
         Computes the policy pi(s, theta) for the given state s and for the \
             current policy parameters theta.
         Same as forward method with a clearer name for teaching purposes, but \
             as forward is a native method that needs to exist we keep both.
-        Additionnaly this methods outputs np.array instead of torch.Tensor to \
-            prevent the existence of pytorch stuff outside of network.py
         Shouldn't be used for update as the hidden state is not updated.
         Args:
-            state (np.array): np.array representation of the state
+            state (torch.Tensor): The state to consider
 
         Returns:
-            np.array: np.array representation of the action probabilities
+            torch.Tensor: The action probabilities
         """
 
-        return self.actor(state).detach().cpu().numpy()
+        return self.actor(state)  # .detach().cpu().numpy()
 
     def get_value(self, state: torch.Tensor) -> torch.Tensor:
         """
@@ -473,14 +510,12 @@ class A2CNetworks:
             policy parameters theta.
         Same as forward method with a clearer name for teaching purposes, but \
             as forward is a native method that needs to exist we keep both.
-        Additionnaly this methods outputs np.array instead of torch.Tensor to \
-            prevent the existence of pytorch stuff outside of network.py
 
         Args:
-            state (np.array): np.array representation of the state
+            state (torch.Tensor): The state to consider
 
         Returns:
-            np.array: np.array representation of the action probabilities
+            torch.Tensor: The action probabilities
         """
         return torch.squeeze(self.critic(state))
 
