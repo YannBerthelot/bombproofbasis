@@ -177,3 +177,39 @@ class ProbeEnv5(gym.Env):
 
     def render(self):
         pass
+
+
+class ProbeEnv6(gym.Env):
+    """
+    n-step
+    """
+
+    metadata = {"render.modes": ["human"]}
+
+    def __init__(self):
+        super().__init__()
+        # Define action and observation space
+        # They must be gym.spaces objects
+        # Example when using discrete actions:
+        self.action_space = spaces.Discrete(2)
+        # Example for using image as input:
+        self.observation_space = spaces.Discrete(1)
+
+    def step(self, action):
+        reward = (
+            1
+            if (
+                (self.random_obs == -1 and action == 0)
+                or (self.random_obs == 1 and action == 1)
+            )
+            else -1
+        )
+        return (np.array([self.random_obs]), reward, True, False, None)
+
+    def reset(self):
+        self.random_obs = get_random_obs()
+        # Reset the state of the environment to an initial state
+        return np.array([self.random_obs]), None
+
+    def render(self):
+        pass
