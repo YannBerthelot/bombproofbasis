@@ -6,7 +6,7 @@ from typing import Tuple, Union
 import numpy as np
 import torch
 
-from bombproofbasis.types import BufferConfig, BufferInternals, BufferStep
+from bombproofbasis.types import BufferConfig, BufferInternals, BufferLogs, BufferStep
 
 
 class RolloutBuffer:
@@ -66,10 +66,15 @@ class RolloutBuffer:
             log_probs=torch.zeros((buffer_size, 1)),
             entropies=torch.zeros((buffer_size, 1)),
             returns=torch.zeros((buffer_size, 1)),
-            advantages=torch.zeros((buffer_size, 1)),
             states=torch.zeros((buffer_size + 1, 1, self.config.obs_shape)),
             actions=torch.zeros((buffer_size, 1)),
             len=0,
+        )
+        self.logs = BufferLogs(
+            rewards=torch.tensor([]),
+            targets=torch.tensor([]),
+            advantages=torch.tensor([]),
+            values=torch.tensor([]),
         )
 
     @property
@@ -290,6 +295,7 @@ class RolloutBuffer:
                  compared to expectations from the critic)
         """
         returns = self.compute_return()
+        assert returns.shape == self.internals.values[: self.internals.len].shape
         return returns - self.internals.values[: self.internals.len], returns
 
     def compute_advantages_TD(
@@ -305,12 +311,15 @@ class RolloutBuffer:
             torch.Tensor: Tensor of advantages (how good were the states when\
                  compared to expectations from the critic)
         """
+
         returns = self.compute_return()[: self.internals.len]
         next_values = self._generate_buffer((self.internals.len, self.config.n_envs))
         next_values[:-1].copy_(
             self.internals.values[self.config.n_steps : self.internals.len]
         )
         next_values[-1].copy_(final_value)
+        assert next_values.shape == returns.shape
+        assert returns.shape == self.internals.dones[: self.internals.len].shape
         expected_value = (
             returns
             + (1 - self.internals.dones[: self.internals.len])
@@ -333,26 +342,18 @@ class RolloutBuffer:
             torch.Tensor: Tensor of advantages (how good were the states when\
                  compared to expectations from the critic)
         """
-        done = self.internals.dones.max() > 0
-        # returns = [
-        #     self.compute_return(
-        #         self.internals.rewards[i : min(self.internals.len, n_steps) + i],
-        #         self.internals.dones[i : min(self.internals.len, n_steps) + i],
-        #     )
-        #     for i in range(min(self.internals.len, n_steps))
-        # ]
         returns = self.compute_return()
         next_values = self._generate_buffer(
             (
-                self.internals.len
-                - 1
-                + int(done)
-                - int(self.internals.dones[1:].max().item()),
+                len(returns),
                 self.config.n_envs,
             )
         )
+
         next_values[:-1].copy_(self.internals.values[self.config.n_steps :])
         next_values[-1].copy_(final_value)
+        assert next_values.shape == returns.shape
+        assert returns.shape == self.internals.dones[1:].shape
         expected_value = (
             returns
             + (1 - self.internals.dones[1:])
@@ -401,6 +402,10 @@ class RolloutBuffer:
                 (self.config.buffer_size, self.config.n_envs)
             )
 
+            self.internals.rewards = self._generate_buffer(
+                (self.config.buffer_size, self.config.n_envs)
+            )
+
             self.internals.len = 0
             self.add(step)
 
@@ -421,3 +426,25 @@ class RolloutBuffer:
             )
 
             self.internals.len = 0
+
+    def add_data_for_logs(
+        self,
+        advantages: torch.Tensor,
+        targets: torch.Tensor,
+        rewards: torch.Tensor,
+        values: torch.Tensor,
+    ):
+        """
+        Add data into the log storage. Only used for logging later, not for updates.
+
+        Args:
+            advantages (torch.Tensor): The batch advantages.
+            targets (torch.Tensor): The batch targets.
+            rewards (torch.Tensor): The batch rewards.
+            values (torch.Tensor): The batch values.
+        """
+        with torch.no_grad():
+            self.logs.advantages = torch.cat((self.logs.advantages, advantages))
+            self.logs.targets = torch.cat((self.logs.targets, targets))
+            self.logs.rewards = torch.cat((self.logs.rewards, rewards))
+            self.logs.values = torch.cat((self.logs.values, values))

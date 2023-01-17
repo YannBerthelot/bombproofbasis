@@ -51,6 +51,7 @@ class Logger:
             self.writer = SummaryWriter(log_dir=log_dir)
 
             # SERIALIZE CONFIG INTO FOLDER
+            self.timestep = None
 
     def log_tensorboard(
         self, scalars: Dict[str, Union[int, float]], timestep: int
@@ -117,12 +118,22 @@ class Logger:
         if self.config.logging_output == "tensorboard":
             self.writer.add_histogram(
                 "Histograms/Values",
-                rollout.internals.values[: rollout.internals.len],
+                rollout.logs.values,
                 timestep,
             )
             self.writer.add_histogram(
                 "Histograms/Rewards",
-                rollout.internals.rewards[: rollout.internals.len],
+                rollout.logs.rewards,
+                timestep,
+            )
+            self.writer.add_histogram(
+                "Histograms/Advantages",
+                rollout.logs.advantages,
+                timestep,
+            )
+            self.writer.add_histogram(
+                "Histograms/Targets",
+                rollout.logs.targets,
                 timestep,
             )
             if weights and (timestep % 10 == 0):

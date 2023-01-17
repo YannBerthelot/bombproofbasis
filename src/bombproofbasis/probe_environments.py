@@ -181,7 +181,9 @@ class ProbeEnv5(gym.Env):
 
 class ProbeEnv6(gym.Env):
     """
-    n-step
+    One action, zero-then-one observation, two timesteps long, +1 reward at \
+    the end: If my agent can learn the value in (2.) but not this one, it must\
+     be that my reward discounting is broken.
     """
 
     metadata = {"render.modes": ["human"]}
@@ -191,25 +193,19 @@ class ProbeEnv6(gym.Env):
         # Define action and observation space
         # They must be gym.spaces objects
         # Example when using discrete actions:
-        self.action_space = spaces.Discrete(2)
+        self.action_space = spaces.Discrete(1)
         # Example for using image as input:
         self.observation_space = spaces.Discrete(1)
+        self.t = 0
 
     def step(self, action):
-        reward = (
-            1
-            if (
-                (self.random_obs == -1 and action == 0)
-                or (self.random_obs == 1 and action == 1)
-            )
-            else -1
-        )
-        return (np.array([self.random_obs]), reward, True, False, None)
+        self.t += 1
+        return (np.array([self.t]), int(self.t == 2), self.t == 2, False, None)
 
     def reset(self):
-        self.random_obs = get_random_obs()
+        self.t = 0
         # Reset the state of the environment to an initial state
-        return np.array([self.random_obs]), None
+        return np.array([self.t]), None
 
     def render(self):
         pass

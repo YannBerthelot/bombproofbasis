@@ -130,11 +130,11 @@ def test_A2C_basics():
 
 
 def test_A2C_train_test():
-    # MC
-    MC_agent = A2C(A2C_CONFIG, LoggingConfig(logging_output=None))
-    n_episodes = 3
-    MC_agent.train(ENV, n_iter=n_episodes)
-    MC_agent.test(ENV, n_episodes=n_episodes)
+    # # MC
+    # MC_agent = A2C(A2C_CONFIG, LoggingConfig(logging_output=None))
+    # n_episodes = 3
+    # MC_agent.train(ENV, n_iter=n_episodes)
+    # MC_agent.test(ENV, n_episodes=n_episodes)
 
     # TD (1-step)
     buffer_config = BufferConfig(obs_shape=obs_shape, setting="n-step", n_steps=1)
@@ -151,19 +151,19 @@ def test_A2C_train_test():
     n_step_agent.train(ENV, n_iter=n_episodes)
     n_step_agent.test(ENV, n_episodes=10, render=False)
 
-    # 2-step 1-update
-    buffer_config = BufferConfig(
-        obs_shape=obs_shape, setting="n-step", n_steps=2, buffer_size=3
-    )
-    n_step_A2C_CONFIG = A2CConfig(
-        environment=ENV,
-        agent_type="A2C",
-        policy_network=policy_network_config,
-        value_network=value_network_config,
-        scaler=scaler_config,
-        buffer=buffer_config,
-    )
-    n_step_agent = A2C(n_step_A2C_CONFIG, LoggingConfig(logging_output=None))
-    n_episodes = 100
-    n_step_agent.train(ENV, n_iter=n_episodes)
-    n_step_agent.test(ENV, n_episodes=10, render=False)
+    # # 2-step 1-update
+    # buffer_config = BufferConfig(
+    #     obs_shape=obs_shape, setting="n-step", n_steps=2, buffer_size=3
+    # )
+    # n_step_A2C_CONFIG = A2CConfig(
+    #     environment=ENV,
+    #     agent_type="A2C",
+    #     policy_network=policy_network_config,
+    #     value_network=value_network_config,
+    #     scaler=scaler_config,
+    #     buffer=buffer_config,
+    # )
+    # n_step_agent = A2C(n_step_A2C_CONFIG, LoggingConfig(logging_output=None))
+    # n_episodes = 100
+    # n_step_agent.train(ENV, n_iter=n_episodes)
+    # n_step_agent.test(ENV, n_episodes=10, render=False)

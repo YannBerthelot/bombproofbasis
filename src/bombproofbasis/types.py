@@ -56,6 +56,16 @@ class BufferInternals(BaseModel):
         arbitrary_types_allowed = True
 
 
+class BufferLogs(BaseModel):
+    rewards: torch.Tensor
+    values: torch.Tensor
+    advantages: torch.Tensor
+    targets: torch.Tensor
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
 class BufferConfig(BaseModel):
     obs_shape: int
     gamma: Optional[float] = 0.99
