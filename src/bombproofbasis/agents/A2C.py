@@ -19,6 +19,8 @@ from bombproofbasis.utils.logging import Logger
 
 # from bombproofbasis.utils.normalize import SimpleStandardizer
 
+WEIGHTS = False
+
 
 class A2C(Agent):
     """
@@ -43,9 +45,19 @@ class A2C(Agent):
 
         self.rollout = RolloutBuffer(config.buffer)
         self.networks = A2CNetworks(config)
-        self.t, self.t_global = 1, 1
-        self.episode_reward, self.episode_num = 0, 0
+        self._t_global = 1
+        self._episode_num = 0
         self.logger = Logger(log_config)
+        probs = torch.tensor(
+            [
+                1 / self.networks.actor.config.input_shape
+                for _ in range(self.networks.actor.config.input_shape)
+            ]
+        )
+        self._max_entropy = (
+            torch.distributions.Categorical(probs=probs).entropy().item()
+        )
+        self.best_episode_reward = -np.inf
 
     def save(self, folder: Path, name: str = "model"):
         """
@@ -68,8 +80,8 @@ class A2C(Agent):
         self.networks.load(folder=folder, name=name)
 
     def collect_rollout(
-        self, env: gym.Env, n_timesteps: PositiveInt
-    ) -> Tuple[torch.Tensor, gym.Env, bool, torch.Tensor]:
+        self, env: gym.Env, n_timesteps: PositiveInt, episode_reward: float
+    ) -> Tuple[torch.Tensor, gym.Env, bool, torch.Tensor, float]:
         """
         Collect the experience according to the buffer's config until either \
             the buffer is full or the episode is finished.
@@ -86,14 +98,15 @@ class A2C(Agent):
                 - Wether or not the environment is finished (done or Truncated).
                 - The cumulative entropy of the rollout.
         """
-        episode_entropy = 0
-        for step in range(n_timesteps):
-            state = self.rollout.get_state(step)
-            action, log_prob, entropy = self.networks.select_action(state)
+        episode_entropy = 0.0
+        for step_number in range(
+            n_timesteps - self.rollout.internals.len
+        ):  # should be computed once and not change during the loop
+            assert n_timesteps == self.rollout.config.buffer_size
+            action, log_prob, entropy = self.networks.select_action(
+                self.rollout.get_state(step_number)
+            )
             obs, reward, done, truncated, _ = env.step(action)
-            self.episode_reward += reward
-            episode_entropy += entropy
-            self.t_global += 1
             finished = done or truncated
             self.rollout.add(
                 BufferStep(
@@ -101,23 +114,38 @@ class A2C(Agent):
                     obs=obs,
                     action=action,
                     log_prob=log_prob,
-                    value=self.networks.get_value(state=state),
+                    value=self.networks.get_value(
+                        state=self.rollout.get_state(step_number)
+                    ),
                     done=finished,
                 )
             )
+
+            episode_reward += reward
+            episode_entropy += entropy / self._max_entropy
+            self._t_global += 1
+
             if finished:
-                self.episode_num += 1
+                assert self.rollout.internals.dones.max() > 0
+                self._episode_num += 1
                 self.logger.log(
-                    {"Reward/Episode": self.episode_reward, "Entropy": episode_entropy},
-                    self.episode_num,
+                    {
+                        "Reward/Train": episode_reward,
+                        "Relative Entropy": episode_entropy / (step_number + 1),
+                    },
+                    self._episode_num,
                 )
-                self.episode_reward = 0
+                self.logger.log_histograms(
+                    self.rollout, self.networks, self._episode_num, weights=WEIGHTS
+                )
+                self.save_if_best(episode_reward)
+                episode_reward = 0.0
                 break
-        with torch.no_grad():
-            final_value = self.networks.get_value(
-                state=self.rollout.get_state(step + 1)
-            )
-        return final_value, env, finished, episode_entropy
+
+        final_value = self.networks.get_value(
+            state=self.rollout.get_state(step_number + 1)
+        )
+        return final_value, env, finished, episode_entropy, episode_reward
 
     def collect_episode(self, env: gym.Env) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -132,35 +160,51 @@ class A2C(Agent):
         """
         obs, _ = env.reset()
         self.rollout.internals.states[0].copy_(self.rollout.obs2tensor(obs))
-        done, truncated = False, False
-        t = 0
         self.networks.reset_hiddens()
-        self.episode_reward = 0
+
+        t = 0
+        episode_reward = 0
         episode_entropy = 0
+        done, truncated = False, False
         while not (done or truncated):
+
             state = self.rollout.get_state(t)
             action, log_prob, entropy = self.networks.select_action(state)
-            value = self.networks.get_value(state=state)
             obs, reward, done, truncated, _ = env.step(action)
-            self.episode_reward += reward
-            episode_entropy += entropy
             self.rollout.add(
                 BufferStep(
                     reward=reward,
                     obs=obs,
                     action=action,
                     log_prob=log_prob,
-                    value=value,
-                    done=done,
+                    value=self.networks.get_value(state=state),
+                    done=(done or truncated),
                 )
             )
+
+            episode_reward += reward
+            episode_entropy += entropy / self._max_entropy
             t += 1
-            self.t_global += 1
-        self.episode_num += 1
-        self.logger.log({"Reward/Episode": self.episode_reward}, self.episode_num)
+            self._t_global += 1
+
+        self.save_if_best(episode_reward)
+        self._episode_num += 1
+        self.logger.log({"Reward/Train": episode_reward}, self._episode_num)
+
         with torch.no_grad():
             final_value = self.networks.get_value(state=self.rollout.get_state(t))
         return final_value, episode_entropy
+
+    def save_if_best(self, episode_reward: float):
+        """
+        Save the model if the previous best score is beaten
+
+        Args:
+            episode_reward (float): The last episode's cumulated reward
+        """
+        if episode_reward >= self.best_episode_reward:
+            self.best_episode_reward = episode_reward
+            self.save(Path("./models"), "best")
 
     def update_policy(self, final_value: torch.Tensor, entropy: torch.Tensor):
         """
@@ -171,12 +215,49 @@ class A2C(Agent):
             final_value (torch.Tensor): The estimation of the value, by the \
                 critic, of the final state of the rollout.
         """
-        actor_loss, critic_loss = self.networks.update(
+        actor_loss, critic_loss, advantages, targets = self.networks.update(
             self.rollout, final_value, entropy
         )
         self.logger.log(
-            {"Loss/Actor": actor_loss, "Loss/Critic": critic_loss}, self.t_global
+            {"Loss/Actor": actor_loss, "Loss/Critic": critic_loss}, self._t_global
         )
+        if advantages is not None:
+            self.rollout.add_data_for_logs(
+                advantages,
+                targets,
+                self.rollout.internals.rewards[: self.rollout.internals.len],
+                self.rollout.internals.values[: self.rollout.internals.len],
+            )
+
+    def _train_TD(self, env: gym.Env, n_updates: PositiveInt):
+        """
+        Train the agent for n_updates in an n-step fashion.
+
+        Args:
+            env (gym.Env): The env to use for training.
+            n_updates (int): How much updates to do.
+        """
+        obs, _ = env.reset()
+        self.rollout.internals.states[0].copy_(self.rollout.obs2tensor(obs))
+        episode_reward = 0.0
+        for _ in tqdm(range(n_updates)):
+            (
+                final_value,
+                env,
+                terminated,
+                entropy,
+                episode_reward,
+            ) = self.collect_rollout(
+                env, self.rollout.config.buffer_size, episode_reward
+            )
+            self.update_policy(final_value, entropy)
+            self.rollout.after_update()
+            if terminated:
+                obs, _ = env.reset()
+                self.rollout.reset()
+                self.rollout.internals.states[0].copy_(self.rollout.obs2tensor(obs))
+
+        env.close()
 
     def _train_n_step(self, env: gym.Env, n_updates: PositiveInt):
         """
@@ -188,17 +269,24 @@ class A2C(Agent):
         """
         obs, _ = env.reset()
         self.rollout.internals.states[0].copy_(self.rollout.obs2tensor(obs))
+        episode_reward = 0.0
         for _ in tqdm(range(n_updates)):
-            final_value, env, terminated, entropy = self.collect_rollout(
-                env, self.rollout.config.buffer_size
+            (
+                final_value,
+                env,
+                terminated,
+                entropy,
+                episode_reward,
+            ) = self.collect_rollout(
+                env, self.rollout.config.buffer_size, episode_reward
             )
             self.update_policy(final_value, entropy)
-            self.rollout.after_update()
             if terminated:
                 obs, _ = env.reset()
                 self.rollout.reset()
                 self.rollout.internals.states[0].copy_(self.rollout.obs2tensor(obs))
-
+            else:
+                self.rollout.after_update(self)
         env.close()
 
     def _train_MC(self, env: gym.Env, n_episodes: int):
@@ -213,6 +301,9 @@ class A2C(Agent):
         for _ in tqdm(range(n_episodes)):
             final_value, episode_entropy = self.collect_episode(env)
             self.update_policy(final_value, episode_entropy)
+            self.logger.log_histograms(
+                self.rollout, self.networks, self._episode_num, weights=WEIGHTS
+            )
             self.rollout.reset()
         env.close()
 
@@ -233,13 +324,16 @@ class A2C(Agent):
         if self.rollout.config.setting == "MC":
             self._train_MC(env, n_episodes=n_iter)
         elif self.rollout.config.setting == "n-step":
-            self._train_n_step(env, n_updates=n_iter)
+            if self.rollout.config.n_steps == 1:
+                self._train_TD(env, n_updates=n_iter)
+            else:
+                self._train_n_step(env, n_updates=n_iter)
         else:
             raise ValueError(
                 f"Urecognized buffer setting : {self.rollout.config.setting}"
             )
 
-    def test(self, env: gym.Env, n_episodes: int, render: bool = False) -> dict:
+    def test(self, env: gym.Env, n_episodes: int, render: bool = False):
         """
         Test/Evaluate the agent given its current state.
 
@@ -252,10 +346,9 @@ class A2C(Agent):
         Returns:
             dict: Testing report for each episode.
         """
-        cumulative_reward_per_episode = {}
         for episode in tqdm(range(n_episodes)):
             self.networks.reset_hiddens()
-            cumulative_reward_per_episode[episode] = 0
+            cumulative_reward = 0
             obs, _ = env.reset()
             done, truncated = False, False
             while not (done or truncated):
@@ -267,11 +360,11 @@ class A2C(Agent):
                     truncated,
                     _,
                 ) = env.step(action)
+                cumulative_reward += reward
                 if render:
                     env.render()
-                cumulative_reward_per_episode[episode] += reward
+            self.logger.log({"Reward/Test": cumulative_reward}, episode)
         env.close()
-        return cumulative_reward_per_episode
 
     def select_action(self, observation: np.ndarray) -> int:
         """
@@ -305,40 +398,6 @@ class A2C(Agent):
         observation = np.expand_dims(observation, axis=0)
         with torch.no_grad():
             return self.networks.critic(self.rollout.obs2tensor(observation)).item()
-
-
-# if timestep % self.config.logging_frequency == 0:
-
-#     if self.config["GLOBAL"]["logging"].lower() == "tensorboard":
-#         if self.writer:
-#             self.writer.add_scalar(
-#                 "Train/entropy loss", -entropy_loss, self.index
-#             )
-#             self.writer.add_scalar(
-#                 "Train/leaarning rate",
-#                 self.lr_scheduler.transform(self.index),
-#                 self.index,
-#             )
-#             self.writer.add_scalar("Train/policy loss", actor_loss, self.index)
-#             self.writer.add_scalar("Train/critic loss", critic_loss, self.index)
-#             # self.writer.add_scalar(
-#             #     "Train/explained variance", explained_variance, self.index
-#             # )
-#             # self.writer.add_scalar("Train/kl divergence", KL_divergence, self.index)
-#         else:
-#             warnings.warn("No Tensorboard writer available")
-#     elif self.config["GLOBAL"]["logging"].lower() == "wandb":
-#         wandb.log(
-#             {
-#                 "Train/entropy loss": -entropy_loss,
-#                 "Train/actor loss": actor_loss,
-#                 "Train/critic loss": critic_loss,
-#                 # "Train/explained variance": explained_variance,
-#                 # "Train/KL divergence": KL_divergence,
-#                 "Train/learning rate": self.lr_scheduler.transform(self.index),
-#             },
-#             commit=False,
-#         )
 
 
 class A2CNetworks:
@@ -389,23 +448,38 @@ class A2CNetworks:
         Also returns relevant elements for updating the networks.
 
         Args:
-            observation (np.ndarray): The observation of the environment to \
+            observation (torch.Tensor): The observation of the environment to \
                 consider
-            hiddens (Dict[int, Tuple[torch.Tensor, torch.Tensor]]): \
-                The hidden(s) state(s) of the actor network
+
 
         Returns:
-            Tuple[ int, Dict[int, Tuple[torch.Tensor, torch.Tensor]],\
-                 Tuple[torch.Tensor, torch.Tensor, torch.Tensor], ]:\
-                    The selected action, the new hidden(s) state(s), \
-                        the relevant features for the A2C update \
-                            (log_prob,entropy and KL div)
+            Tuple[int, torch.Tensor, torch.Tensor]: The selected action, its\
+                 log probability and the entropy of the policy in that state.
         """
         probs = self.actor(observation)
         dist = torch.distributions.Categorical(probs=probs)
         action = dist.sample().detach()
         log_prob = dist.log_prob(action)
         return int(action.item()), log_prob, dist.entropy().mean()
+
+    def get_log_prob(
+        self, observation: torch.Tensor, action: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Wrapper to get the log probability of an action after a given obs for \
+            the current state of the actor.
+
+        Args:
+            observation (torch.Tensor): The observation ton consider for policy.
+            action (torch.Tensor): The action for which to compute log prob.
+
+        Returns:
+            torch.Tensor: The current log prob of the action in the given obs.
+        """
+        probs = self.actor(observation)
+        dist = torch.distributions.Categorical(probs=probs)
+        log_prob = dist.log_prob(action)
+        return log_prob
 
     def A2C_loss(
         self, log_prob: torch.Tensor, advantage: torch.Tensor, entropy: torch.Tensor
@@ -421,6 +495,7 @@ class A2CNetworks:
         Returns:
             Tuple[torch.Tensor, torch.Tensor]: The actor and critic losses
         """
+        assert log_prob.shape == advantage.shape
         entropy_loss = self.config.entropy_coeff * entropy
         policy_loss = (-log_prob * advantage.detach()).mean() - entropy_loss
         value_loss = advantage.pow(2).mean()
@@ -428,7 +503,7 @@ class A2CNetworks:
 
     def update(
         self, buffer: RolloutBuffer, final_value: torch.Tensor, entropy: torch.Tensor
-    ) -> Union[Tuple[torch.Tensor, torch.Tensor], None]:
+    ) -> Union[Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor], None]:
         """
         Update the nework's weights according to A2C rule.
 
@@ -440,12 +515,18 @@ class A2CNetworks:
         # For logging purposes
         torch.autograd.set_detect_anomaly(True)
         self.index += 1
-        n_steps = 0 if buffer.config.setting == "MC" else buffer.config.n_steps - 1
-        advantages = buffer.compute_advantages(final_value)
+        advantages, target = buffer.compute_advantages(final_value)
+        if buffer.config.setting == "MC":
+            val = buffer.internals.len
+        else:
+            if buffer.config.n_steps == 1:
+                val = buffer.internals.len
+            else:
+                val = max(buffer.internals.len - 1, buffer.config.n_steps)
         if advantages is not None:
             actor_loss, critic_loss = self.A2C_loss(
-                buffer.internals.log_probs[: buffer.internals.len - n_steps],
-                advantages[: buffer.internals.len],
+                buffer.internals.log_probs[:val],
+                advantages,
                 entropy,
             )
             self.actor_optimizer.zero_grad()
@@ -455,26 +536,24 @@ class A2CNetworks:
             self.critic_optimizer.zero_grad()
             critic_loss.backward(retain_graph=False)
             self.critic_optimizer.step()
-            return actor_loss, critic_loss
-        return None, None
+            return actor_loss, critic_loss, advantages, target
+        return None, None, None, None
 
-    def get_action_probabilities(self, state: torch.Tensor) -> np.ndarray:
+    def get_action_probabilities(self, state: torch.Tensor) -> torch.Tensor:
         """
         Computes the policy pi(s, theta) for the given state s and for the \
             current policy parameters theta.
         Same as forward method with a clearer name for teaching purposes, but \
             as forward is a native method that needs to exist we keep both.
-        Additionnaly this methods outputs np.array instead of torch.Tensor to \
-            prevent the existence of pytorch stuff outside of network.py
         Shouldn't be used for update as the hidden state is not updated.
         Args:
-            state (np.array): np.array representation of the state
+            state (torch.Tensor): The state to consider
 
         Returns:
-            np.array: np.array representation of the action probabilities
+            torch.Tensor: The action probabilities
         """
 
-        return self.actor(state).detach().cpu().numpy()
+        return self.actor(state)  # .detach().cpu().numpy()
 
     def get_value(self, state: torch.Tensor) -> torch.Tensor:
         """
@@ -482,14 +561,12 @@ class A2CNetworks:
             policy parameters theta.
         Same as forward method with a clearer name for teaching purposes, but \
             as forward is a native method that needs to exist we keep both.
-        Additionnaly this methods outputs np.array instead of torch.Tensor to \
-            prevent the existence of pytorch stuff outside of network.py
 
         Args:
-            state (np.array): np.array representation of the state
+            state (torch.Tensor): The state to consider
 
         Returns:
-            np.array: np.array representation of the action probabilities
+            torch.Tensor: The action probabilities
         """
         return torch.squeeze(self.critic(state))
 
@@ -501,8 +578,8 @@ class A2CNetworks:
             name (str, optional): [Name of the model]. Defaults to "model".
         """
         print(f"Saving at {folder}/{name}_XXXX.pth")
-        torch.save(self.actor, f"{folder}/{name}_actor.pth")
-        torch.save(self.critic, f"{folder}/{name}_critic.pth")
+        torch.save(self.actor, f"{Path(folder)}/{name}_actor.pth")
+        torch.save(self.critic, f"{Path(folder)}/{name}_critic.pth")
 
     def load(self, folder: Path, name: str = "model") -> None:
         """
@@ -513,8 +590,8 @@ class A2CNetworks:
                 "models" folder). Defaults to "model".
         """
         print("Loading")
-        self.actor = torch.load(f"{folder}/{name}_actor.pth")
-        self.critic = torch.load(f"{folder}/{name}_critic.pth")
+        self.actor = torch.load(f"{Path(folder)}/{name}_actor.pth")
+        self.critic = torch.load(f"{Path(folder)}/{name}_critic.pth")
 
     # def fit_transform(self, x) -> torch.Tensor:
     #     self.scaler.partial_fit(x)

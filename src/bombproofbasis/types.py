@@ -18,6 +18,7 @@ class NetworkConfig(BaseModel):
     actor: bool = True
     model_path: Optional[Path] = Path("./models")
     hardware: Optional[str] = "CPU"
+    max_grad_norm: float = 0.05
 
     @validator("hardware", allow_reuse=True)
     def hardware_match(cls, v: str) -> str:
@@ -55,8 +56,18 @@ class BufferInternals(BaseModel):
         arbitrary_types_allowed = True
 
 
+class BufferLogs(BaseModel):
+    rewards: torch.Tensor
+    values: torch.Tensor
+    advantages: torch.Tensor
+    targets: torch.Tensor
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
 class BufferConfig(BaseModel):
-    obs_shape: tuple
+    obs_shape: int
     gamma: Optional[float] = 0.99
     buffer_size: Optional[int] = 5
     n_steps: Optional[int] = 1
@@ -90,15 +101,17 @@ class A2CConfig(AgentConfig):
 
 
 class LoggingConfig(BaseModel):
-    logging_output: str = "tensorboard"
+    logging_output: Union[str, None] = "tensorboard"
     logging_frequency: int = 1
     log_path: Path = Path("./logs")
+    run_name: str = "run"
 
     @validator("logging_output")
     def logging_match(cls, v: str) -> str:
         possible_values = ["tensorboard", "wandb"]
-        if v.lower() not in possible_values:
-            raise ValueError(f"logging must be in {possible_values}, you chose {v}")
+        if v is not None:
+            if v.lower() not in possible_values:
+                raise ValueError(f"logging must be in {possible_values}, you chose {v}")
         return v
 
 
