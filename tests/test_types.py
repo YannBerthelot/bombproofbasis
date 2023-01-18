@@ -49,11 +49,7 @@ def test_config():
     )
     agent_with_scaler_config
 
-    logging_config = LoggingConfig(logging_output="wandb", logging_frequency=10)
-    with pytest.raises(ValueError):
-        bad_logging_config = LoggingConfig(
-            logging_output="nonsense", logging_frequency=10
-        )
+    logging_config = LoggingConfig(wandb=True, tensorboard=True, logging_frequency=10)
     training_config = TrainingConfig(
         agent=agent_config,
         nb_timesteps_train=int(1e3),
