@@ -4,9 +4,9 @@ Logging helpers
 import os
 from typing import Any, Dict, Optional, Union
 
+import wandb
 from torch.utils.tensorboard import SummaryWriter
 
-import wandb
 from bombproofbasis.types import A2CConfig, LoggingConfig
 
 # def wandb_train_logging(config: TrainingConfig, scaler: Optional[Scaler]) -> None:
@@ -54,11 +54,14 @@ class Logger:
             os.makedirs(log_dir, exist_ok=True)
             self.writer = SummaryWriter(log_dir=log_dir)
         if self.config.wandb:
+            folder = self.config.log_path
+            os.makedirs(folder, exist_ok=True)
             wandb.init(
                 project=self.config.project_name,
                 name=self.config.run_name,
                 config=agent_config.dict(),
                 group=self.config.group,
+                dir=folder,
             )
             recurrent = "LSTM" in "".join(
                 agent_config.value_network.architecture
