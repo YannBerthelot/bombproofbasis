@@ -9,29 +9,6 @@ from torch.utils.tensorboard import SummaryWriter
 
 from bombproofbasis.types import A2CConfig, LoggingConfig
 
-# def wandb_train_logging(config: TrainingConfig, scaler: Optional[Scaler]) -> None:
-#     os.makedirs("./data", exist_ok=True)
-#     artifact = wandb.Artifact(f"{config.comment}_model_actor", type="model")
-#     artifact.add_file(f"{config.model_path}/{config.comment}_best_actor.pth")
-#     wandb.run.log_artifact(artifact)
-
-#     artifact = wandb.Artifact(f"{config.comment}_model_critic", type="model")
-#     artifact.add_file(f"{config.model_path}/{config.comment}_best_critic.pth")
-#     wandb.run.log_artifact(artifact)
-
-#     if scaler is not None:
-#         artifact = wandb.Artifact(f"{config.comment}_obs_scaler", type="scaler")
-#         pickle.dump(
-#             scaler,
-#             open(f"data/{config.comment}_obs_scaler.pkl", "wb"),
-#         )
-#         artifact.add_file(f"data/{config.comment}_obs_scaler.pkl")
-
-#         # Save the artifact version to W&B and mark it as the output of this run
-#         wandb.run.log_artifact(artifact)
-#     else:
-#         pass
-
 
 class Logger:
     """
