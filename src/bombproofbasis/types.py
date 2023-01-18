@@ -101,18 +101,13 @@ class A2CConfig(AgentConfig):
 
 
 class LoggingConfig(BaseModel):
-    logging_output: Union[str, None] = "tensorboard"
+    tensorboard: bool = True
+    wandb: bool = False
     logging_frequency: int = 1
     log_path: Path = Path("./logs")
     run_name: str = "run"
-
-    @validator("logging_output")
-    def logging_match(cls, v: str) -> str:
-        possible_values = ["tensorboard", "wandb"]
-        if v is not None:
-            if v.lower() not in possible_values:
-                raise ValueError(f"logging must be in {possible_values}, you chose {v}")
-        return v
+    project_name: str = "test"
+    group: str = None
 
 
 class TrainingConfig(BaseModel):

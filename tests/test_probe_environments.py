@@ -77,11 +77,11 @@ def get_config(env):
 def test_1():
     env = ProbeEnv1()
     td_config, MC_config = get_config(env)
-    agent = A2C(MC_config, LoggingConfig(logging_output=None))
+    agent = A2C(MC_config, LoggingConfig(wandb=False, tensorboard=False))
     agent.train(env, n_iter=500)
     assert agent.get_value(env.reset()[0]) == pytest.approx(1.0, rel=eps)
 
-    agent = A2C(td_config, LoggingConfig(logging_output=None))
+    agent = A2C(td_config, LoggingConfig(wandb=False, tensorboard=False))
     agent.train(env, n_iter=500)
     assert agent.get_value(env.reset()[0]) == pytest.approx(1.0, rel=eps)
 
@@ -89,12 +89,12 @@ def test_1():
 def test_2():
     env = ProbeEnv2()
     td_config, MC_config = get_config(env)
-    agent = A2C(MC_config, LoggingConfig(logging_output=None))
+    agent = A2C(MC_config, LoggingConfig(wandb=False, tensorboard=False))
     agent.train(env, n_iter=500)
     assert agent.get_value(np.array([-1])) == pytest.approx(-1, rel=eps)
     assert agent.get_value(np.array([1])) == pytest.approx(1, rel=eps)
 
-    agent = A2C(td_config, LoggingConfig(logging_output=None))
+    agent = A2C(td_config, LoggingConfig(wandb=False, tensorboard=False))
     agent.train(env, n_iter=500)
     assert agent.get_value(np.array([-1])) == pytest.approx(-1, rel=eps)
     assert agent.get_value(np.array([1])) == pytest.approx(1, rel=eps)
@@ -103,12 +103,12 @@ def test_2():
 def test_3():
     env = ProbeEnv3()
     td_config, MC_config = get_config(env)
-    agent = A2C(MC_config, LoggingConfig(logging_output=None))
+    agent = A2C(MC_config, LoggingConfig(wandb=False, tensorboard=False))
     agent.train(env, n_iter=500)
     assert agent.get_value(np.array([0])) == pytest.approx(gamma, rel=eps)
     assert agent.get_value(np.array([1])) == pytest.approx(1, rel=eps)
 
-    agent = A2C(td_config, LoggingConfig(logging_output=None))
+    agent = A2C(td_config, LoggingConfig(wandb=False, tensorboard=False))
     agent.train(env, n_iter=500)
     assert agent.get_value(np.array([0])) == pytest.approx(gamma, rel=eps)
     assert agent.get_value(np.array([1])) == pytest.approx(1, rel=eps)
@@ -117,13 +117,13 @@ def test_3():
 def test_4():
     env = ProbeEnv4()
     td_config, MC_config = get_config(env)
-    agent = A2C(MC_config, LoggingConfig(logging_output=None))
+    agent = A2C(MC_config, LoggingConfig(wandb=False, tensorboard=False))
     agent.train(env, n_iter=500)
     for _ in range(10):
         obs, _ = env.reset()
         assert agent.select_action(obs) == 0
 
-    agent = A2C(td_config, LoggingConfig(logging_output=None))
+    agent = A2C(td_config, LoggingConfig(wandb=False, tensorboard=False))
     agent.train(env, n_iter=500)
     for _ in range(10):
         obs, _ = env.reset()
@@ -133,7 +133,7 @@ def test_4():
 def test_5():
     env = ProbeEnv5()
     td_config, MC_config = get_config(env)
-    agent = A2C(MC_config, LoggingConfig(logging_output=None))
+    agent = A2C(MC_config, LoggingConfig(wandb=False, tensorboard=False))
     agent.train(env, n_iter=500)
     for _ in range(10):
         assert agent.select_action(-1) == 0
@@ -141,7 +141,7 @@ def test_5():
     assert agent.get_value(-1) == pytest.approx(1, rel=eps)
     assert agent.get_value(1) == pytest.approx(1, rel=eps)
 
-    agent = A2C(td_config, LoggingConfig(logging_output=None))
+    agent = A2C(td_config, LoggingConfig(wandb=False, tensorboard=False))
     agent.train(env, n_iter=500)
     for _ in range(10):
         assert agent.select_action(-1) == 0
