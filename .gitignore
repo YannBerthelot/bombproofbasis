@@ -133,3 +133,4 @@ changelog.d/*.md
 .DS_Store
 models
 logs
+wandb

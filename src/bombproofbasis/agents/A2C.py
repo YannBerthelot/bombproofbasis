@@ -1,6 +1,7 @@
 """
 A2C agent
 """
+import os
 from pathlib import Path
 from typing import Tuple, Union
 
@@ -47,7 +48,7 @@ class A2C(Agent):
         self.networks = A2CNetworks(config)
         self._t_global = 1
         self._episode_num = 0
-        self.logger = Logger(log_config)
+        self.logger = Logger(log_config, agent_config=config)
         probs = torch.tensor(
             [
                 1 / self.networks.actor.config.input_shape
@@ -189,8 +190,13 @@ class A2C(Agent):
 
         self.save_if_best(episode_reward)
         self._episode_num += 1
-        self.logger.log({"Reward/Train": episode_reward}, self._episode_num)
-
+        self.logger.log(
+            {
+                "Reward/Train": episode_reward,
+                "Relative Entropy": episode_entropy / (t + 1),
+            },
+            self._episode_num,
+        )
         with torch.no_grad():
             final_value = self.networks.get_value(state=self.rollout.get_state(t))
         return final_value, episode_entropy
@@ -204,7 +210,10 @@ class A2C(Agent):
         """
         if episode_reward >= self.best_episode_reward:
             self.best_episode_reward = episode_reward
-            self.save(Path("./models"), "best")
+            self.save(self.networks.actor.config.model_path, "best")
+            self.logger.run_summary(
+                {"Best train episode reward": self.best_episode_reward}
+            )
 
     def update_policy(self, final_value: torch.Tensor, entropy: torch.Tensor):
         """
@@ -332,6 +341,16 @@ class A2C(Agent):
             raise ValueError(
                 f"Urecognized buffer setting : {self.rollout.config.setting}"
             )
+        self.logger.log_model(
+            {
+                "best_actor": os.path.join(
+                    self.networks.actor.config.model_path, "best_actor.pth"
+                ),
+                "best_critic": os.path.join(
+                    self.networks.actor.config.model_path, "best_critic.pth"
+                ),
+            }
+        )
 
     def test(self, env: gym.Env, n_episodes: int, render: bool = False):
         """
@@ -346,6 +365,7 @@ class A2C(Agent):
         Returns:
             dict: Testing report for each episode.
         """
+        episode_rewards = []
         for episode in tqdm(range(n_episodes)):
             self.networks.reset_hiddens()
             cumulative_reward = 0
@@ -363,8 +383,12 @@ class A2C(Agent):
                 cumulative_reward += reward
                 if render:
                     env.render()
-            self.logger.log({"Reward/Test": cumulative_reward}, episode)
+            self.logger.log(
+                {"Reward/Test": cumulative_reward}, episode + 1, commit=True
+            )
+            episode_rewards.append(cumulative_reward)
         env.close()
+        self.logger.run_summary({"Mean test reward": np.mean(episode_rewards)})
 
     def select_action(self, observation: np.ndarray) -> int:
         """

@@ -76,33 +76,37 @@ A2C_2_step_CONFIG = A2CConfig(
 
 if __name__ == "__main__":
     for i in range(10):
-        agent = A2C(A2C_MC_CONFIG, LoggingConfig(run_name=f"MC {i}"))
+        agent = A2C(
+            A2C_MC_CONFIG,
+            LoggingConfig(run_name=f"MC {i}", tensorboard=False, wandb=True),
+        )
         print("ACTOR", agent.networks.actor)
         print("CRITIC", agent.networks.critic)
         agent.train(ENV, n_iter=300)
         agent.networks.load(folder=Path("./models"), name="best")
         agent.test(ENV, n_episodes=10, render=False)
+        agent.logger.finish_logging()
 
-        n_steps = 1
-        buffer_size = 1
-        agent = A2C(
-            A2C_TD_CONFIG,
-            LoggingConfig(run_name=f"n-step {i} {n_steps=} {buffer_size=}"),
-        )
-        print("ACTOR", agent.networks.actor)
-        print("CRITIC", agent.networks.critic)
-        agent.train(ENV, n_iter=25000)
-        agent.networks.load(folder=Path("./models"), name="best")
-        agent.test(ENV, n_episodes=10, render=False)
+        # n_steps = 1
+        # buffer_size = 1
+        # agent = A2C(
+        #     A2C_TD_CONFIG,
+        #     LoggingConfig(run_name=f"n-step {i} {n_steps=} {buffer_size=}"),
+        # )
+        # print("ACTOR", agent.networks.actor)
+        # print("CRITIC", agent.networks.critic)
+        # agent.train(ENV, n_iter=25000)
+        # agent.networks.load(folder=Path("./models"), name="best")
+        # agent.test(ENV, n_episodes=10, render=False)
 
-        n_steps = 2
-        buffer_size = 3
-        agent = A2C(
-            A2C_TD_CONFIG,
-            LoggingConfig(run_name=f"n-step {i} {n_steps=} {buffer_size=}"),
-        )
-        print("ACTOR", agent.networks.actor)
-        print("CRITIC", agent.networks.critic)
-        agent.train(ENV, n_iter=int(25000 / 2))
-        agent.networks.load(folder=Path("./models"), name="best")
-        agent.test(ENV, n_episodes=10, render=False)
+        # n_steps = 2
+        # buffer_size = 3
+        # agent = A2C(
+        #     A2C_TD_CONFIG,
+        #     LoggingConfig(run_name=f"n-step {i} {n_steps=} {buffer_size=}"),
+        # )
+        # print("ACTOR", agent.networks.actor)
+        # print("CRITIC", agent.networks.critic)
+        # agent.train(ENV, n_iter=int(25000 / 2))
+        # agent.networks.load(folder=Path("./models"), name="best")
+        # agent.test(ENV, n_episodes=10, render=False)
