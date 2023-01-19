@@ -3,7 +3,7 @@ A2C agent
 """
 import os
 from pathlib import Path
-from typing import Tuple, Union
+from typing import Optional, Tuple, Union
 
 import gym
 import numpy as np
@@ -133,6 +133,8 @@ class A2C(Agent):
                     {
                         "Reward/Train": episode_reward,
                         "Relative Entropy": episode_entropy / (step_number + 1),
+                        "Timestep": self._t_global,
+                        "Episode": self._episode_num,
                     },
                     self._episode_num,
                 )
@@ -194,6 +196,8 @@ class A2C(Agent):
             {
                 "Reward/Train": episode_reward,
                 "Relative Entropy": episode_entropy / (t + 1),
+                "Timestep": self._t_global,
+                "Episode": self._episode_num,
             },
             self._episode_num,
         )
@@ -228,7 +232,12 @@ class A2C(Agent):
             self.rollout, final_value, entropy
         )
         self.logger.log(
-            {"Loss/Actor": actor_loss, "Loss/Critic": critic_loss}, self._t_global
+            {
+                "Loss/Actor": actor_loss / self.rollout.internals.len,
+                "Loss/Critic": critic_loss / self.rollout.internals.len,
+                "timestep": self._t_global,
+            },
+            self._t_global,
         )
         if advantages is not None:
             self.rollout.add_data_for_logs(
@@ -238,7 +247,7 @@ class A2C(Agent):
                 self.rollout.internals.values[: self.rollout.internals.len],
             )
 
-    def _train_TD(self, env: gym.Env, n_updates: PositiveInt):
+    def _train_TD(self, env: gym.Env, n_iter: PositiveInt):
         """
         Train the agent for n_updates in an n-step fashion.
 
@@ -249,26 +258,38 @@ class A2C(Agent):
         obs, _ = env.reset()
         self.rollout.internals.states[0].copy_(self.rollout.obs2tensor(obs))
         episode_reward = 0.0
-        for _ in tqdm(range(n_updates)):
-            (
-                final_value,
-                env,
-                terminated,
-                entropy,
-                episode_reward,
-            ) = self.collect_rollout(
-                env, self.rollout.config.buffer_size, episode_reward
-            )
-            self.update_policy(final_value, entropy)
-            self.rollout.after_update()
-            if terminated:
-                obs, _ = env.reset()
-                self.rollout.reset()
-                self.rollout.internals.states[0].copy_(self.rollout.obs2tensor(obs))
 
+        with tqdm(total=n_iter) as pbar:
+            while self._t_global < n_iter:
+                old_t = self._t_global
+
+                (
+                    final_value,
+                    env,
+                    terminated,
+                    entropy,
+                    episode_reward,
+                ) = self.collect_rollout(
+                    env, self.rollout.config.buffer_size, episode_reward
+                )
+                self.update_policy(final_value, entropy)
+                self.rollout.after_update()
+                if terminated:
+                    obs, _ = env.reset()
+                    self.rollout.reset()
+                    self.rollout.internals.states[0].copy_(self.rollout.obs2tensor(obs))
+
+                pbar.update(self._t_global - old_t)
+                self.logger.log(
+                    {
+                        "Average time per step": pbar.format_dict["elapsed"]
+                        / pbar.format_dict["n"]
+                    },
+                    self._t_global,
+                )
         env.close()
 
-    def _train_n_step(self, env: gym.Env, n_updates: PositiveInt):
+    def _train_n_step(self, env: gym.Env, n_iter: PositiveInt):
         """
         Train the agent for n_updates in an n-step fashion.
 
@@ -279,26 +300,43 @@ class A2C(Agent):
         obs, _ = env.reset()
         self.rollout.internals.states[0].copy_(self.rollout.obs2tensor(obs))
         episode_reward = 0.0
-        for _ in tqdm(range(n_updates)):
-            (
-                final_value,
-                env,
-                terminated,
-                entropy,
-                episode_reward,
-            ) = self.collect_rollout(
-                env, self.rollout.config.buffer_size, episode_reward
-            )
-            self.update_policy(final_value, entropy)
-            if terminated:
-                obs, _ = env.reset()
-                self.rollout.reset()
-                self.rollout.internals.states[0].copy_(self.rollout.obs2tensor(obs))
-            else:
-                self.rollout.after_update(self)
+
+        with tqdm(total=n_iter) as pbar:
+            while self._t_global < n_iter:
+                old_t = self._t_global
+                (
+                    final_value,
+                    env,
+                    terminated,
+                    entropy,
+                    episode_reward,
+                ) = self.collect_rollout(
+                    env, self.rollout.config.buffer_size, episode_reward
+                )
+                self.update_policy(final_value, entropy)
+                if terminated:
+                    obs, _ = env.reset()
+                    self.rollout.reset()
+                    self.rollout.internals.states[0].copy_(self.rollout.obs2tensor(obs))
+                else:
+                    self.rollout.after_update(self)
+
+                pbar.update(self._t_global - old_t)
+                self.logger.log(
+                    {
+                        "Average time per step": pbar.format_dict["elapsed"]
+                        / pbar.format_dict["n"]
+                    },
+                    self._t_global,
+                )
         env.close()
 
-    def _train_MC(self, env: gym.Env, n_episodes: int):
+    def _train_MC(
+        self,
+        env: gym.Env,
+        n_iter: int,
+        n_episodes: Optional[int] = None,
+    ):
         """
         Train the agent in an MC fashion.
 
@@ -307,20 +345,37 @@ class A2C(Agent):
             n_episodes (int): The number of episodes to train the agent for.
 
         """
-        for _ in tqdm(range(n_episodes)):
-            final_value, episode_entropy = self.collect_episode(env)
-            self.update_policy(final_value, episode_entropy)
-            self.logger.log_histograms(
-                self.rollout, self.networks, self._episode_num, weights=WEIGHTS
-            )
-            self.rollout.reset()
+        if n_episodes is not None:
+            for _ in tqdm(range(n_episodes)):
+                final_value, episode_entropy = self.collect_episode(env)
+                self.update_policy(final_value, episode_entropy)
+                self.logger.log_histograms(
+                    self.rollout, self.networks, self._episode_num, weights=WEIGHTS
+                )
+                self.rollout.reset()
+        else:
+            with tqdm(total=n_iter) as pbar:
+                while self._t_global < n_iter:
+                    old_t = self._t_global
+
+                    final_value, episode_entropy = self.collect_episode(env)
+                    self.update_policy(final_value, episode_entropy)
+                    self.logger.log_histograms(
+                        self.rollout, self.networks, self._episode_num, weights=WEIGHTS
+                    )
+
+                    pbar.update(self._t_global - old_t)
+                    self.rollout.reset()
+                self.logger.log(
+                    {
+                        "Average time per step": pbar.format_dict["elapsed"]
+                        / pbar.format_dict["n"]
+                    },
+                    self._t_global,
+                )
         env.close()
 
-    def train(
-        self,
-        env: gym.Env,
-        n_iter: int,
-    ):
+    def train(self, env: gym.Env, n_iter: int, n_episodes: Optional[int] = None):
         """
         Wrapper for training the agent according to the relevant method.
 
@@ -331,12 +386,12 @@ class A2C(Agent):
                 - updates for "n-step" stting
         """
         if self.rollout.config.setting == "MC":
-            self._train_MC(env, n_episodes=n_iter)
+            self._train_MC(env, n_iter=n_iter, n_episodes=n_episodes)
         elif self.rollout.config.setting == "n-step":
             if self.rollout.config.n_steps == 1:
-                self._train_TD(env, n_updates=n_iter)
+                self._train_TD(env, n_iter=n_iter)
             else:
-                self._train_n_step(env, n_updates=n_iter)
+                self._train_n_step(env, n_iter=n_iter)
         else:
             raise ValueError(
                 f"Urecognized buffer setting : {self.rollout.config.setting}"
@@ -384,7 +439,9 @@ class A2C(Agent):
                 if render:
                     env.render()
             self.logger.log(
-                {"Reward/Test": cumulative_reward}, episode + 1, commit=True
+                {"Reward/Test": cumulative_reward, "Episode test": episode + 1},
+                episode + 1,
+                commit=True,
             )
             episode_rewards.append(cumulative_reward)
         env.close()
