@@ -125,32 +125,34 @@ class Logger:
                 weights. Defaults to False.
         """
         if self.config.tensorboard:
-            self.add_histogram(
+            self.writer.add_histogram(
                 "Histograms/Values",
                 rollout.logs.values,
                 timestep,
             )
-            self.add_histogram(
+            self.writer.add_histogram(
                 "Histograms/Rewards",
                 rollout.logs.rewards,
                 timestep,
             )
-            self.add_histogram(
+            self.writer.add_histogram(
                 "Histograms/Advantages",
                 rollout.logs.advantages,
                 timestep,
             )
-            self.add_histogram(
+            self.writer.add_histogram(
                 "Histograms/Targets",
                 rollout.logs.targets,
                 timestep,
             )
             if weights and (timestep % 10 == 0):
                 for name, weight in networks.actor.named_parameters():
-                    self.add_histogram(f"Weights/{name} actor", weight, timestep)
+                    self.writer.add_histogram(f"Weights/{name} actor", weight, timestep)
 
                 for name, weight in networks.critic.named_parameters():
-                    self.add_histogram(f"Weights/{name} critic", weight, timestep)
+                    self.writer.add_histogram(
+                        f"Weights/{name} critic", weight, timestep
+                    )
 
         if self.config.wandb:
             wandb.log(

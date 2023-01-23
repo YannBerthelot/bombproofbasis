@@ -192,7 +192,6 @@ class A2C(Agent):
                 critic.
         """
         obs, _ = env.reset(seed=self.seed)
-        print("reset obs")
         self.rollout.internals.states[0].copy_(self.rollout.obs2tensor(obs))
         self.networks.reset_hiddens()
 
