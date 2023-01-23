@@ -15,7 +15,7 @@ from bombproofbasis.types import (
     ScalerConfig,
 )
 
-ENV = gym.make("LunarLander-v2", render_mode="rgb_array")
+ENV = gym.make("CartPole-v1", render_mode="rgb_array")
 action_shape = get_action_shape(ENV)
 obs_shape = get_obs_shape(ENV)
 critic_architecture = ["64", "relu", "32", "relu"]
@@ -76,11 +76,11 @@ A2C_2_step_CONFIG = A2CConfig(
 
 if __name__ == "__main__":
     WANDB = True
-    TENSORBOARD = False
+    TENSORBOARD = True
     deterministic = False
     N_TRAIN_STEPS = 50000
     N_TEST_EPISODES = 10
-    PROJECT_NAME = "benchmark 4"
+    PROJECT_NAME = "test logging"
     for i in range(10):
         agent = A2C(
             A2C_MC_CONFIG,
