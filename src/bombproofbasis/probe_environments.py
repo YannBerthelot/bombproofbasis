@@ -28,7 +28,7 @@ class ProbeEnv1(gym.Env):
     def step(self, action):
         return (np.array([0]), 1, True, False, None)
 
-    def reset(self):
+    def reset(self, seed=None):
         # Reset the state of the environment to an initial state
         return np.array([0]), None
 
@@ -63,8 +63,9 @@ class ProbeEnv2(gym.Env):
     def step(self, action):
         return (np.array([get_random_obs()]), self.random_obs, True, False, None)
 
-    def reset(self):
+    def reset(self, seed=None):
         # Reset the state of the environment to an initial state
+        np.random.seed(seed)
         self.random_obs = get_random_obs()
         return np.array([self.random_obs]), None
 
@@ -95,7 +96,7 @@ class ProbeEnv3(gym.Env):
         self.t += 1
         return (np.array([self.t]), int(self.t == 2), self.t == 2, False, None)
 
-    def reset(self):
+    def reset(self, seed=None):
         self.t = 0
         # Reset the state of the environment to an initial state
         return np.array([self.t]), None
@@ -128,7 +129,7 @@ class ProbeEnv4(gym.Env):
     def step(self, action):
         return (np.array([0]), 1 if action == 0 else -1, True, False, None)
 
-    def reset(self):
+    def reset(self, seed=None):
         # Reset the state of the environment to an initial state
         return np.array([0]), None
 
@@ -170,7 +171,8 @@ class ProbeEnv5(gym.Env):
         )
         return (np.array([self.random_obs]), reward, True, False, None)
 
-    def reset(self):
+    def reset(self, seed=None):
+        np.random.seed(seed)
         self.random_obs = get_random_obs()
         # Reset the state of the environment to an initial state
         return np.array([self.random_obs]), None

@@ -15,7 +15,7 @@ from bombproofbasis.types import (
     ScalerConfig,
 )
 
-ENV = gym.make("CartPole-v1", render_mode="rgb_array")
+ENV = gym.make("LunarLander-v2", render_mode="rgb_array")
 action_shape = get_action_shape(ENV)
 obs_shape = get_obs_shape(ENV)
 critic_architecture = ["64", "relu", "32", "relu"]
@@ -75,38 +75,70 @@ A2C_2_step_CONFIG = A2CConfig(
 )
 
 if __name__ == "__main__":
+    WANDB = True
+    TENSORBOARD = False
+    deterministic = False
+    N_TRAIN_STEPS = 50000
+    N_TEST_EPISODES = 10
+    PROJECT_NAME = "benchmark 4"
     for i in range(10):
         agent = A2C(
             A2C_MC_CONFIG,
-            LoggingConfig(run_name=f"MC {i}", tensorboard=False, wandb=True),
+            LoggingConfig(
+                project_name=PROJECT_NAME,
+                group="MC",
+                run_name=i,
+                tensorboard=TENSORBOARD,
+                wandb=WANDB,
+            ),
         )
         print("ACTOR", agent.networks.actor)
         print("CRITIC", agent.networks.critic)
-        agent.train(ENV, n_iter=300)
+        agent.train(ENV, n_iter=N_TRAIN_STEPS)
         agent.networks.load(folder=Path("./models"), name="best")
-        agent.test(ENV, n_episodes=10, render=False)
+        agent.test(
+            ENV, n_episodes=N_TEST_EPISODES, render=False, deterministic=deterministic
+        )
         agent.logger.finish_logging()
 
-        # n_steps = 1
-        # buffer_size = 1
-        # agent = A2C(
-        #     A2C_TD_CONFIG,
-        #     LoggingConfig(run_name=f"n-step {i} {n_steps=} {buffer_size=}"),
-        # )
-        # print("ACTOR", agent.networks.actor)
-        # print("CRITIC", agent.networks.critic)
-        # agent.train(ENV, n_iter=25000)
-        # agent.networks.load(folder=Path("./models"), name="best")
-        # agent.test(ENV, n_episodes=10, render=False)
+        n_steps = 1
+        buffer_size = 1
+        agent = A2C(
+            A2C_TD_CONFIG,
+            LoggingConfig(
+                project_name=PROJECT_NAME,
+                group="TD",
+                run_name=f"{i} {n_steps=} {buffer_size=}",
+                tensorboard=TENSORBOARD,
+                wandb=WANDB,
+            ),
+        )
+        print("ACTOR", agent.networks.actor)
+        print("CRITIC", agent.networks.critic)
+        agent.train(ENV, n_iter=N_TRAIN_STEPS)
+        agent.networks.load(folder=Path("./models"), name="best")
+        agent.test(
+            ENV, n_episodes=N_TEST_EPISODES, render=False, deterministic=deterministic
+        )
+        agent.logger.finish_logging()
 
-        # n_steps = 2
-        # buffer_size = 3
-        # agent = A2C(
-        #     A2C_TD_CONFIG,
-        #     LoggingConfig(run_name=f"n-step {i} {n_steps=} {buffer_size=}"),
-        # )
-        # print("ACTOR", agent.networks.actor)
-        # print("CRITIC", agent.networks.critic)
-        # agent.train(ENV, n_iter=int(25000 / 2))
-        # agent.networks.load(folder=Path("./models"), name="best")
-        # agent.test(ENV, n_episodes=10, render=False)
+        n_steps = 2
+        buffer_size = 3
+        agent = A2C(
+            A2C_2_step_CONFIG,
+            LoggingConfig(
+                project_name=PROJECT_NAME,
+                group="n-step",
+                run_name=f"{i} {n_steps=} {buffer_size=}",
+                tensorboard=TENSORBOARD,
+                wandb=WANDB,
+            ),
+        )
+        print("ACTOR", agent.networks.actor)
+        print("CRITIC", agent.networks.critic)
+        agent.train(ENV, n_iter=N_TRAIN_STEPS)
+        agent.networks.load(folder=Path("./models"), name="best")
+        agent.test(
+            ENV, n_episodes=N_TEST_EPISODES, render=False, deterministic=deterministic
+        )
+        agent.logger.finish_logging()

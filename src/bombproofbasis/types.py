@@ -9,6 +9,8 @@ import numpy as np
 import torch
 from pydantic import BaseModel, validator
 
+import bombproofbasis as pdb
+
 
 class NetworkConfig(BaseModel):
     learning_rate: float = 1e-3
@@ -90,6 +92,8 @@ class AgentConfig(BaseModel):
     log_path: Optional[Path] = Path("./logs")
     value_network: Optional[NetworkConfig]
     scaler: Optional[ScalerConfig]
+    package_version: Optional[str] = pdb.__version__
+    seed: Optional[int] = None
 
     class Config:
         arbitrary_types_allowed = True
