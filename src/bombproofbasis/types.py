@@ -93,6 +93,7 @@ class AgentConfig(BaseModel):
     value_network: Optional[NetworkConfig]
     scaler: Optional[ScalerConfig]
     package_version: Optional[str] = pdb.__version__
+    seed: Optional[int] = None
 
     class Config:
         arbitrary_types_allowed = True

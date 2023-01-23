@@ -21,6 +21,7 @@ from bombproofbasis.utils.logging import Logger
 # from bombproofbasis.utils.normalize import SimpleStandardizer
 
 WEIGHTS = False
+SEED_SIZE = 100000000
 
 
 class A2C(Agent):
@@ -43,6 +44,7 @@ class A2C(Agent):
             config (A2CConfig): _description_
         """
         super().__init__(config)
+        config = self.seeding(config)
 
         self.rollout = RolloutBuffer(config.buffer)
         self.networks = A2CNetworks(config)
@@ -59,6 +61,34 @@ class A2C(Agent):
             torch.distributions.Categorical(probs=probs).entropy().item()
         )
         self.best_episode_reward = -np.inf
+
+    def seeding(self, config: A2CConfig) -> A2CConfig:
+        """
+        Uses the given seed for every random operations (torch, \
+            numpy and environment).
+        If seed is not defined, picks a random one and saves it \
+            in the config for reproducibility.
+
+        Args:
+            config (A2CConfig): A2C config from which to extract seed.
+        """
+        if config.seed is None:
+            config.seed = np.random.randint(SEED_SIZE)
+        torch.manual_seed(config.seed)
+        np.random.seed(config.seed)
+        torch.use_deterministic_algorithms(True)
+        return config
+
+    @property
+    def seed(self) -> int:
+        """
+        Seed to be used in the env reset. Uses the config seed defined in \
+            "seeding" function.
+
+        Returns:
+            int: The next seed
+        """
+        return np.random.randint(SEED_SIZE)
 
     def save(self, folder: Path, name: str = "model"):
         """
@@ -161,7 +191,8 @@ class A2C(Agent):
             torch.Tensor: The estimation of the final's state value by the \
                 critic.
         """
-        obs, _ = env.reset()
+        obs, _ = env.reset(seed=self.seed)
+        print("reset obs")
         self.rollout.internals.states[0].copy_(self.rollout.obs2tensor(obs))
         self.networks.reset_hiddens()
 
@@ -255,7 +286,7 @@ class A2C(Agent):
             env (gym.Env): The env to use for training.
             n_updates (int): How much updates to do.
         """
-        obs, _ = env.reset()
+        obs, _ = env.reset(seed=self.seed)
         self.rollout.internals.states[0].copy_(self.rollout.obs2tensor(obs))
         episode_reward = 0.0
 
@@ -275,7 +306,7 @@ class A2C(Agent):
                 self.update_policy(final_value, entropy)
                 self.rollout.after_update()
                 if terminated:
-                    obs, _ = env.reset()
+                    obs, _ = env.reset(seed=self.seed)
                     self.rollout.reset()
                     self.rollout.internals.states[0].copy_(self.rollout.obs2tensor(obs))
 
@@ -297,7 +328,7 @@ class A2C(Agent):
             env (gym.Env): The env to use for training.
             n_updates (int): How much updates to do.
         """
-        obs, _ = env.reset()
+        obs, _ = env.reset(seed=self.seed)
         self.rollout.internals.states[0].copy_(self.rollout.obs2tensor(obs))
         episode_reward = 0.0
 
@@ -315,7 +346,7 @@ class A2C(Agent):
                 )
                 self.update_policy(final_value, entropy)
                 if terminated:
-                    obs, _ = env.reset()
+                    obs, _ = env.reset(seed=self.seed)
                     self.rollout.reset()
                     self.rollout.internals.states[0].copy_(self.rollout.obs2tensor(obs))
                 else:
@@ -366,13 +397,13 @@ class A2C(Agent):
 
                     pbar.update(self._t_global - old_t)
                     self.rollout.reset()
-                self.logger.log(
-                    {
-                        "Average time per step": pbar.format_dict["elapsed"]
-                        / pbar.format_dict["n"]
-                    },
-                    self._t_global,
-                )
+                    self.logger.log(
+                        {
+                            "Average time per step": pbar.format_dict["elapsed"]
+                            / pbar.format_dict["n"]
+                        },
+                        self._t_global,
+                    )
         env.close()
 
     def train(self, env: gym.Env, n_iter: int, n_episodes: Optional[int] = None):
@@ -407,7 +438,13 @@ class A2C(Agent):
             }
         )
 
-    def test(self, env: gym.Env, n_episodes: int, render: bool = False):
+    def test(
+        self,
+        env: gym.Env,
+        n_episodes: int,
+        render: Optional[bool] = False,
+        deterministic: Optional[bool] = False,
+    ):
         """
         Test/Evaluate the agent given its current state.
 
@@ -416,18 +453,15 @@ class A2C(Agent):
             n_episodes (int): The number of episodes to test the agent.
             render (bool, optional): Wether or not to render the environment \
                 while testing. Defaults to False.
-
-        Returns:
-            dict: Testing report for each episode.
         """
         episode_rewards = []
         for episode in tqdm(range(n_episodes)):
             self.networks.reset_hiddens()
             cumulative_reward = 0
-            obs, _ = env.reset()
+            obs, _ = env.reset(seed=self.seed)
             done, truncated = False, False
             while not (done or truncated):
-                action = self.select_action(obs)
+                action = self.select_action(obs, deterministic=deterministic)
                 (
                     obs,
                     reward,
@@ -447,7 +481,9 @@ class A2C(Agent):
         env.close()
         self.logger.run_summary({"Mean test reward": np.mean(episode_rewards)})
 
-    def select_action(self, observation: np.ndarray) -> int:
+    def select_action(
+        self, observation: np.ndarray, deterministic: bool = False
+    ) -> int:
         """
         Action selection wrapper from numpy to numpy without gradients
         See A2CNetworks's select action for one with gradients.
@@ -461,8 +497,12 @@ class A2C(Agent):
         observation = np.expand_dims(observation, axis=0)
         with torch.no_grad():
             probs = self.networks.actor(self.rollout.obs2tensor(observation))
-            dist = torch.distributions.Categorical(probs=probs)  # gradient needed
-            action = int(dist.sample().item())
+            if not deterministic:
+
+                dist = torch.distributions.Categorical(probs=probs)  # gradient needed
+                action = int(dist.sample().item())
+            else:
+                action = np.argmax(probs.numpy())
         return action
 
     def get_value(self, observation: np.ndarray) -> float:
