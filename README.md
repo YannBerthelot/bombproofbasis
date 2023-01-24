@@ -51,10 +51,10 @@ Pull requests are welcome. For major changes, please open an issue first to disc
 
 ## To-do
 
-- Add seeding of everything for reproducibility (for research and debugging)
-- Extend probe environments for MC and n-steps
-- Benchmark agents
-- Find a way to check if LSTMs add anything
-- Extend from 2-steps to n-steps
-- Extend batch-size for n-steps
-- Add parallel-env support
+-[X] Add seeding of everything for reproducibility (for research and debugging)
+-[ ] Extend probe environments for MC and n-steps
+-[ ] Benchmark agents
+-[ ] Find a way to check if LSTMs add anything
+-[ ] Extend from 2-steps to n-steps
+-[ ] Extend batch-size for n-steps
+-[ ] Add parallel-env support
